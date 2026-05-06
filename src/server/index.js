@@ -14,10 +14,12 @@ import {
   adminVerifyDomain,
 } from "./admin.js";
 import { handleKeysRequest } from "./keys-endpoint.js";
+import { handleDelegationsRequest } from "./delegations-endpoint.js";
 import { handleReceive } from "./receive.js";
 import { authRoutes } from "./routes/auth.js";
 import { mailRoutes } from "./routes/mail.js";
 import { accountRoutes } from "./routes/account.js";
+import { delegationsRoutes } from "./routes/delegations.js";
 
 export function handleServerKeyRequest() {
   const serverKeys = ensureServerKeys();
@@ -40,9 +42,13 @@ export function createServerApp() {
     .use(authRoutes())
     .use(mailRoutes())
     .use(accountRoutes())
+    .use(delegationsRoutes())
     .post("/.smxp/receive", ({ request }) => handleReceive(request))
     .get("/.well-known/smxp/keys/:domain/:alias", ({ params }) =>
       handleKeysRequest(params.domain, params.alias),
+    )
+    .get("/.well-known/smxp/delegations/:domain", ({ request, params }) =>
+      handleDelegationsRequest(request, params.domain),
     )
     .get("/.smxp/admin/domains", ({ request }) => adminListDomains(request))
     .post("/.smxp/admin/domains", ({ request }) => adminCreateDomain(request))

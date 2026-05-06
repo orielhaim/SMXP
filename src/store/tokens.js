@@ -23,7 +23,6 @@ export function createToken({
   domain,
   type,
   name = null,
-  permissions = "full",
   expiresAt = null,
 }) {
   const db = getDb();
@@ -35,8 +34,8 @@ export function createToken({
   const now = Math.floor(Date.now() / 1000);
 
   db.run(
-    `INSERT INTO tokens (id, hash, alias, domain, type, name, permissions, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tokens (id, hash, alias, domain, type, name, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       hashToken(token),
@@ -44,7 +43,6 @@ export function createToken({
       domain,
       type,
       name,
-      permissions,
       expiresAt ?? (type === "session" ? now + SESSION_LIFETIME : null),
     ],
   );
@@ -86,7 +84,7 @@ export function getTokensByAlias(alias, domain, type = null) {
   if (type) {
     return db
       .query(
-        `SELECT id, type, name, permissions, expires_at, created_at, last_used
+        `SELECT id, type, name, expires_at, created_at, last_used
          FROM tokens WHERE alias = ? AND domain = ? AND type = ?
          ORDER BY created_at DESC`,
       )
@@ -94,7 +92,7 @@ export function getTokensByAlias(alias, domain, type = null) {
   }
   return db
     .query(
-      `SELECT id, type, name, permissions, expires_at, created_at, last_used
+      `SELECT id, type, name, expires_at, created_at, last_used
        FROM tokens WHERE alias = ? AND domain = ?
        ORDER BY created_at DESC`,
     )

@@ -22,6 +22,7 @@ export function storeMessage(
       direction,
       type,
       sender,
+      on_behalf_of,
       recipient,
       delivered_to,
       subject,
@@ -31,7 +32,7 @@ export function storeMessage(
       signature,
       key_id,
       verified
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       envelope.id,
       envelope.conversation_id,
@@ -39,6 +40,7 @@ export function storeMessage(
       direction,
       envelope.type ?? "message",
       envelope.sender,
+      envelope.on_behalf_of ?? null,
       envelope.recipient,
       deliveredTo,
       envelope.subject ?? null,

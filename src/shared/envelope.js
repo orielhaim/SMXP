@@ -23,6 +23,7 @@ export function createEnvelope({
   conversation_id,
   in_reply_to,
   content_type = "text",
+  on_behalf_of,
   secretKey,
   keyId,
 }) {
@@ -47,6 +48,9 @@ export function createEnvelope({
   const normalizedInReplyTo = isNonEmptyString(in_reply_to)
     ? in_reply_to.trim()
     : null;
+  const normalizedOnBehalfOf = isNonEmptyString(on_behalf_of)
+    ? on_behalf_of.trim()
+    : null;
 
   const preimage = JSON.stringify([
     from,
@@ -60,6 +64,7 @@ export function createEnvelope({
     content_type,
     normalizedSubject ?? "",
     normalizedBody ?? "",
+    normalizedOnBehalfOf ?? "",
   ]);
   const hash = createHash("sha256").update(preimage).digest();
   const id = toBase64Url(hash);
@@ -75,6 +80,7 @@ export function createEnvelope({
     content_type,
   };
 
+  if (normalizedOnBehalfOf) envelope.on_behalf_of = normalizedOnBehalfOf;
   if (normalizedName) envelope.name = normalizedName;
   if (normalizedSubject !== null) envelope.subject = normalizedSubject;
   if (normalizedBody !== null) envelope.body = normalizedBody;
@@ -149,6 +155,13 @@ export function validateEnvelope(envelope) {
     return "in_reply_to must be a non-empty string";
   }
 
+  if (
+    envelope.on_behalf_of !== undefined &&
+    !isNonEmptyString(envelope.on_behalf_of)
+  ) {
+    return "on_behalf_of must be a non-empty string";
+  }
+
   const type = envelope.type ?? "message";
   if (!MESSAGE_TYPES.includes(type)) {
     return "unsupported message type";
@@ -169,6 +182,8 @@ export function normalizeEnvelopeForStorage(envelope) {
     body: typeof envelope.body === "string" ? envelope.body : null,
     in_reply_to:
       typeof envelope.in_reply_to === "string" ? envelope.in_reply_to : null,
+    on_behalf_of:
+      typeof envelope.on_behalf_of === "string" ? envelope.on_behalf_of : null,
     expires: Number.isInteger(envelope.expires) ? envelope.expires : null,
   };
 }

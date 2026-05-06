@@ -6,6 +6,7 @@ import {
 import { resolveDeliveryAddress } from "../store/addresses.js";
 import { domainExists } from "../store/domains.js";
 import { messageExists, storeMessage } from "../store/messages.js";
+import { verifyDelegation } from "./verification.js";
 
 function jsonResponse(body, status) {
   return new Response(JSON.stringify(body), {
@@ -55,6 +56,10 @@ export async function deliverEnvelope(envelope, verifySender) {
 
   try {
     await verifySender(envelope, from);
+
+    if (envelope.on_behalf_of) {
+      await verifyDelegation(envelope.from, envelope.on_behalf_of, "send");
+    }
 
     const deliveredTo = [];
     for (const delivery of deliveries) {

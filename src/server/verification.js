@@ -4,7 +4,10 @@ import { verifyObjectSignature, verifySignature } from "../crypto/verify.js";
 import { discoverSmxp } from "../dns/discover.js";
 import { dohQuery } from "../dns/doh.js";
 import { getSignableBytes } from "../shared/envelope.js";
+import { parseAddress } from "../shared/address.js";
 import { getDb } from "../store/db.js";
+import { domainExists } from "../store/domains.js";
+import { getDelegationByDelegate } from "../store/delegations.js";
 
 function shouldVerifyDnsFingerprint(domain) {
   return domain !== "localhost" && !resolveTarget(domain);
@@ -76,6 +79,83 @@ export async function fetchAliasPublicKey(domain, alias) {
   }
 
   return await res.json();
+}
+
+export async function fetchAliasDelegation(domain, alias, delegate) {
+  const resolved = resolveTarget(domain);
+  const target = resolved || (await discoverSmxp(domain));
+  const baseUrl = buildBaseUrl(target.host, target.port);
+  const url = `${baseUrl}/.well-known/smxp/delegations/${encodeURIComponent(domain)}?alias=${encodeURIComponent(alias)}&delegate=${encodeURIComponent(delegate)}`;
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch alias delegation: ${res.status}`);
+  }
+
+  return await res.json();
+}
+
+export async function verifyDelegation(
+  delegate,
+  onBehalfOf,
+  requiredScope = "send",
+) {
+  const onBehalfOfParsed = parseAddress(onBehalfOf);
+
+  if (domainExists(onBehalfOfParsed.domain)) {
+    const delegation = getDelegationByDelegate(
+      onBehalfOfParsed.domain,
+      onBehalfOfParsed.localPart,
+      delegate,
+    );
+
+    if (!delegation) {
+      throw new Error(`No delegation found for ${delegate} on ${onBehalfOf}`);
+    }
+
+    if (delegation.scope !== requiredScope) {
+      throw new Error(
+        `Delegation found but scope is ${delegation.scope}, requires ${requiredScope}`,
+      );
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    if (delegation.expires_at !== null && delegation.expires_at < now) {
+      throw new Error("Delegation is expired");
+    }
+
+    return true;
+  }
+
+  const aliasKeyResponse = await fetchAliasPublicKey(
+    onBehalfOfParsed.domain,
+    onBehalfOfParsed.localPart,
+  );
+  const delegationResponse = await fetchAliasDelegation(
+    onBehalfOfParsed.domain,
+    onBehalfOfParsed.localPart,
+    delegate,
+  );
+
+  const { signature, key_id, ...delegationPayload } = delegationResponse;
+
+  const isValid = verifyObjectSignature(
+    delegationPayload,
+    signature,
+    aliasKeyResponse.public_key,
+  );
+
+  if (!isValid) {
+    throw new Error("Delegation signature verification failed");
+  }
+
+  if (delegationPayload.scope !== requiredScope) {
+    throw new Error(
+      `Delegation found but scope is ${delegationPayload.scope}, requires ${requiredScope}`,
+    );
+  }
+
+  return true;
 }
 
 export async function verifyRemoteSender(envelope, senderDomain, senderAlias) {

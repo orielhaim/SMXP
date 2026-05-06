@@ -203,6 +203,7 @@ export function mailRoutes() {
               conversation_id,
               in_reply_to: body.in_reply_to || null,
               content_type: body.content_type || "text",
+              on_behalf_of: body.on_behalf_of || null,
             });
 
             results.push({
@@ -237,6 +238,7 @@ export function mailRoutes() {
           conversation_id: t.Optional(t.String()),
           in_reply_to: t.Optional(t.String()),
           content_type: t.Optional(t.String()),
+          on_behalf_of: t.Optional(t.String()),
         }),
       },
     )
@@ -295,6 +297,7 @@ export function mailRoutes() {
               conversation_id: row.conversation_id,
               in_reply_to: params.id,
               content_type: body.content_type || "text",
+              on_behalf_of: body.on_behalf_of || null,
             });
             results.push({
               status: "edited",
@@ -318,6 +321,7 @@ export function mailRoutes() {
           body: t.Optional(t.String()),
           subject: t.Optional(t.String()),
           content_type: t.Optional(t.String()),
+          on_behalf_of: t.Optional(t.String()),
         }),
       },
     );

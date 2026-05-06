@@ -56,7 +56,6 @@ export function initSchema() {
       alias TEXT NOT NULL, 
       type TEXT NOT NULL CHECK (type IN ('session', 'apikey')), 
       name TEXT, 
-      permissions TEXT NOT NULL DEFAULT 'full' CHECK (permissions IN ('full', 'readonly')), 
       expires_at INTEGER, 
       created_at INTEGER NOT NULL DEFAULT (unixepoch()), 
       last_used INTEGER, 
@@ -69,6 +68,23 @@ export function initSchema() {
   `);
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS delegations ( 
+      id TEXT PRIMARY KEY, 
+      domain TEXT NOT NULL, 
+      alias TEXT NOT NULL, 
+      delegate TEXT NOT NULL, 
+      scope TEXT NOT NULL DEFAULT 'send' CHECK (scope IN ('send', 'read', 'manage')), 
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()), 
+      expires_at INTEGER, 
+      FOREIGN KEY (domain, alias) REFERENCES addresses (domain, alias) ON DELETE CASCADE
+    )
+  `);
+
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_delegations_delegate ON delegations(delegate)
+  `);
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS messages ( 
       id TEXT NOT NULL, 
       conversation_id TEXT NOT NULL, 
@@ -76,6 +92,7 @@ export function initSchema() {
       direction TEXT NOT NULL CHECK (direction IN ('in', 'out')), 
       type TEXT NOT NULL DEFAULT 'message' CHECK (type IN ('message', 'edit', 'delete', 'receipt')), 
       sender TEXT NOT NULL, 
+      on_behalf_of TEXT, 
       recipient TEXT NOT NULL, 
       delivered_to TEXT NOT NULL, 
       subject TEXT, 

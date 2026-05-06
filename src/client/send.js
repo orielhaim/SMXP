@@ -1,6 +1,6 @@
 import { discoverSmxp } from "../dns/discover.js";
 import { deliverEnvelope } from "../server/delivery.js";
-import { verifyLocalSender } from "../server/verification.js";
+import { verifyLocalSender, verifyDelegation } from "../server/verification.js";
 import { parseAddress } from "../shared/address.js";
 import {
   createEnvelope,
@@ -22,6 +22,7 @@ export async function sendMessage({
   conversation_id,
   in_reply_to,
   content_type,
+  on_behalf_of,
 }) {
   const sender = parseAddress(from);
   const recipient = parseAddress(to);
@@ -31,6 +32,11 @@ export async function sendMessage({
     throw new Error(
       `Inbox address "${sender.address}" not found in local store`,
     );
+  }
+
+  if (on_behalf_of) {
+    const onBehalfOfParsed = parseAddress(on_behalf_of);
+    await verifyDelegation(sender.address, onBehalfOfParsed.address, "send");
   }
 
   const envelope = createEnvelope({
@@ -44,6 +50,7 @@ export async function sendMessage({
     conversation_id,
     in_reply_to,
     content_type,
+    on_behalf_of,
     secretKey: address.secret_key,
     keyId: address.key_id,
   });

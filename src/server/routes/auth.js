@@ -72,14 +72,13 @@ export function authRoutes() {
           return jsonResponse({ error: "unauthorized" }, 401);
         }
 
-        const { name, permissions, expires_at } = body;
+        const { name, expires_at } = body;
 
         const { token, id } = createToken({
           alias: authInfo.alias,
           domain: authInfo.domain,
           type: "apikey",
           name: name || null,
-          permissions: permissions || "full",
           expiresAt: expires_at || null,
         });
 
@@ -88,7 +87,6 @@ export function authRoutes() {
             token,
             id,
             name: name || null,
-            permissions: permissions || "full",
             expires_at: expires_at || null,
           },
           201,
@@ -97,7 +95,6 @@ export function authRoutes() {
       {
         body: t.Object({
           name: t.Optional(t.String()),
-          permissions: t.Optional(t.String()),
           expires_at: t.Optional(t.Nullable(t.Number())),
         }),
       },
