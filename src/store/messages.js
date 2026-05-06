@@ -28,7 +28,13 @@ function mapMessageRow(row) {
   };
 }
 
-export function storeMessage(dbPath, envelope, direction, verified = 0) {
+export function storeMessage(
+  dbPath,
+  envelope,
+  direction,
+  verified = 0,
+  deliveredTo = envelope.to,
+) {
   const db = getDb(dbPath);
   db.run(
     `INSERT OR IGNORE INTO messages (
@@ -38,6 +44,7 @@ export function storeMessage(dbPath, envelope, direction, verified = 0) {
       name,
       "from",
       "to",
+      delivered_to,
       subject,
       body,
       expires_at,
@@ -45,7 +52,7 @@ export function storeMessage(dbPath, envelope, direction, verified = 0) {
       signature,
       key_id,
       verified
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       envelope.id,
       direction,
@@ -53,6 +60,7 @@ export function storeMessage(dbPath, envelope, direction, verified = 0) {
       envelope.name ?? null,
       envelope.from,
       envelope.to,
+      deliveredTo,
       envelope.subject,
       envelope.body,
       envelope.expires ?? null,
@@ -69,7 +77,7 @@ export function getMessages(dbPath, direction, alias) {
   if (direction === "in") {
     return db
       .query(
-        `SELECT * FROM messages WHERE direction = 'in' AND "to" = ? ORDER BY created_at DESC`,
+        `SELECT * FROM messages WHERE direction = 'in' AND delivered_to = ? ORDER BY created_at DESC`,
       )
       .all(alias)
       .map(mapMessageRow);
@@ -82,8 +90,10 @@ export function getMessages(dbPath, direction, alias) {
     .map(mapMessageRow);
 }
 
-export function messageExists(dbPath, id) {
+export function messageExists(dbPath, id, direction = "in") {
   const db = getDb(dbPath);
-  const row = db.query(`SELECT id FROM messages WHERE id = ?`).get(id);
+  const row = db
+    .query(`SELECT id FROM messages WHERE id = ? AND direction = ?`)
+    .get(id, direction);
   return !!row;
 }

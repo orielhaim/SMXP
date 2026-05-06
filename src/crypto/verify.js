@@ -10,12 +10,16 @@ export function verifySignature(
     const sig = fromBase64Url(signatureBase64Url);
     const publicKey = fromBase64Url(publicKeyBase64Url);
     return ml_dsa65.verify(sig, messageBytes, publicKey);
-  } catch (e) {
+  } catch {
     return false;
   }
 }
 
-export function verifyObjectSignature(obj, signatureBase64Url, publicKeyBase64Url) {
+export function verifyObjectSignature(
+  obj,
+  signatureBase64Url,
+  publicKeyBase64Url,
+) {
   const json = JSON.stringify(obj);
   const bytes = new TextEncoder().encode(json);
   return verifySignature(bytes, signatureBase64Url, publicKeyBase64Url);

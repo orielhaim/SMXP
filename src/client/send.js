@@ -1,10 +1,14 @@
 import config from "../config.js";
 import { discoverSmxp } from "../dns/discover.js";
+import { deliverEnvelope } from "../server/delivery.js";
+import { verifyLocalSender } from "../server/verification.js";
+import { parseAddress } from "../shared/address.js";
 import {
   createEnvelope,
   normalizeEnvelopeForStorage,
 } from "../shared/envelope.js";
-import { getAlias } from "../store/aliases.js";
+import { getInboxAliasByAddress } from "../store/aliases.js";
+import { domainExists } from "../store/domains.js";
 import { storeMessage } from "../store/messages.js";
 import { buildBaseUrl, resolveTarget } from "./resolve.js";
 
@@ -18,16 +22,17 @@ export async function sendMessage({
   type,
   references,
 }) {
-  const aliasPart = from.split("@")[0];
-  const alias = getAlias(config.dbPath, aliasPart);
+  const sender = parseAddress(from);
+  const recipient = parseAddress(to);
+  const alias = getInboxAliasByAddress(config.dbPath, sender.address);
 
   if (!alias) {
-    throw new Error(`Alias "${aliasPart}" not found in local store`);
+    throw new Error(`Inbox alias "${sender.address}" not found in local store`);
   }
 
   const envelope = createEnvelope({
-    from,
-    to,
+    from: sender.address,
+    to: recipient.address,
     name,
     subject,
     body,
@@ -38,10 +43,33 @@ export async function sendMessage({
     keyId: alias.key_id,
   });
 
-  const recipientDomain = to.split("@")[1];
-  const target = await discoverSmxp(recipientDomain);
+  if (domainExists(config.dbPath, recipient.domain)) {
+    console.log(`[SEND] Local delivery to ${recipient.address}`);
+    const response = await deliverEnvelope(config.dbPath, envelope, (message) =>
+      verifyLocalSender(config.dbPath, message, alias),
+    );
 
-  const resolved = resolveTarget(recipientDomain);
+    if (!response.ok) {
+      const errBody = await response.text();
+      throw new Error(`Local delivery failed: ${response.status} ${errBody}`);
+    }
+
+    const result = await response.json();
+    storeMessage(
+      config.dbPath,
+      normalizeEnvelopeForStorage(envelope),
+      "out",
+      1,
+      sender.address,
+    );
+
+    console.log(`[SEND] Message ${envelope.id} delivered locally`);
+    return { envelope, result };
+  }
+
+  const target = await discoverSmxp(recipient.domain);
+
+  const resolved = resolveTarget(recipient.domain);
   const baseUrl = resolved
     ? buildBaseUrl(resolved.host, resolved.port)
     : buildBaseUrl(target.host, target.port);
@@ -62,7 +90,13 @@ export async function sendMessage({
 
   const result = await res.json();
 
-  storeMessage(config.dbPath, normalizeEnvelopeForStorage(envelope), "out", 1);
+  storeMessage(
+    config.dbPath,
+    normalizeEnvelopeForStorage(envelope),
+    "out",
+    1,
+    sender.address,
+  );
 
   console.log(`[SEND] Message ${envelope.id} delivered successfully`);
   return { envelope, result };

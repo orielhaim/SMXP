@@ -1,19 +1,136 @@
+import { formatAddress, parseAddress } from "../shared/address.js";
 import { getDb } from "./db.js";
+import { createDomain } from "./domains.js";
 
-export function createAlias(dbPath, alias, publicKey, secretKey, keyId, algorithm = "ML-DSA-65") {
+export function createInboxAlias(
+  dbPath,
+  domain,
+  alias,
+  publicKey,
+  secretKey,
+  keyId,
+  algorithm = "ML-DSA-65",
+) {
   const db = getDb(dbPath);
+  const normalizedDomain = domain.trim().toLowerCase();
+  const normalizedAlias = alias.trim().toLowerCase();
+
+  if (normalizedAlias === "*") {
+    throw new Error("wildcard aliases can only be forwards");
+  }
+
+  createDomain(dbPath, normalizedDomain);
   db.run(
-    `INSERT OR REPLACE INTO aliases (alias, public_key, secret_key, key_id, algorithm) VALUES (?, ?, ?, ?, ?)`,
-    [alias, publicKey, secretKey, keyId, algorithm],
+    `INSERT OR REPLACE INTO aliases (
+      domain,
+      alias,
+      mode,
+      forward_to,
+      public_key,
+      secret_key,
+      key_id,
+      algorithm
+    ) VALUES (?, ?, 'inbox', NULL, ?, ?, ?, ?)`,
+    [normalizedDomain, normalizedAlias, publicKey, secretKey, keyId, algorithm],
   );
 }
 
-export function getAlias(dbPath, alias) {
+export function createForwardAlias(dbPath, domain, alias, forwardTo) {
   const db = getDb(dbPath);
-  return db.query(`SELECT * FROM aliases WHERE alias = ?`).get(alias);
+  const normalizedDomain = domain.trim().toLowerCase();
+  const normalizedAlias = alias.trim().toLowerCase();
+  const target = parseAddress(forwardTo);
+
+  if (target.domain !== normalizedDomain) {
+    throw new Error("forward targets must belong to the same domain");
+  }
+
+  createDomain(dbPath, normalizedDomain);
+  const targetAlias = getAlias(dbPath, target.domain, target.localPart);
+  if (!targetAlias) {
+    throw new Error(`forward target "${target.address}" does not exist`);
+  }
+
+  db.run(
+    `INSERT OR REPLACE INTO aliases (
+      domain,
+      alias,
+      mode,
+      forward_to,
+      public_key,
+      secret_key,
+      key_id,
+      algorithm
+    ) VALUES (?, ?, 'forward', ?, NULL, NULL, NULL, 'ML-DSA-65')`,
+    [normalizedDomain, normalizedAlias, target.address],
+  );
+}
+
+export function getAlias(dbPath, domain, alias) {
+  const db = getDb(dbPath);
+  return db
+    .query(`SELECT * FROM aliases WHERE domain = ? AND alias = ?`)
+    .get(domain.trim().toLowerCase(), alias.trim().toLowerCase());
 }
 
 export function getAllAliases(dbPath) {
   const db = getDb(dbPath);
-  return db.query(`SELECT alias, public_key, key_id, algorithm, created_at FROM aliases`).all();
+  return db
+    .query(
+      `SELECT domain, alias, mode, forward_to, public_key, key_id, algorithm, created_at
+       FROM aliases
+       ORDER BY domain, alias`,
+    )
+    .all();
 }
+
+export function getInboxAliasByAddress(dbPath, address) {
+  const { domain, localPart } = parseAddress(address);
+  const alias = getAlias(dbPath, domain, localPart);
+
+  if (!alias || alias.mode !== "inbox") {
+    return null;
+  }
+
+  return alias;
+}
+
+export function resolveDeliveryAlias(dbPath, address) {
+  const parsed = parseAddress(address);
+  let currentLocalPart = parsed.localPart;
+  const visited = new Set();
+
+  for (let depth = 0; depth < 100; depth++) {
+    const currentAddress = formatAddress(currentLocalPart, parsed.domain);
+    if (visited.has(currentAddress)) {
+      throw new Error(`forward loop detected at ${currentAddress}`);
+    }
+    visited.add(currentAddress);
+
+    const exactAlias = getAlias(dbPath, parsed.domain, currentLocalPart);
+    const alias =
+      exactAlias ?? (depth === 0 ? getAlias(dbPath, parsed.domain, "*") : null);
+
+    if (!alias) {
+      return null;
+    }
+
+    if (alias.mode === "inbox") {
+      return {
+        alias,
+        originalAddress: parsed.address,
+        deliveredTo: formatAddress(alias.alias, alias.domain),
+      };
+    }
+
+    const target = parseAddress(alias.forward_to);
+    if (target.domain !== parsed.domain) {
+      throw new Error("forward targets must belong to the same domain");
+    }
+    currentLocalPart = target.localPart;
+  }
+
+  throw new Error("forward chain is too deep");
+}
+
+export const createAlias = createInboxAlias;

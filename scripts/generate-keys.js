@@ -1,34 +1,37 @@
-import { generateKeyPair, serializePublicKey, serializeSecretKey } from "../src/crypto/keys.js";
-import { fingerprintPublicKey } from "../src/crypto/keys.js";
-import { initSchema } from "../src/store/schema.js";
+import {
+  fingerprintPublicKey,
+  generateKeyPair,
+  serializePublicKey,
+  serializeSecretKey,
+} from "../src/crypto/keys.js";
+import { createForwardAlias, createInboxAlias } from "../src/store/aliases.js";
 import { getDb } from "../src/store/db.js";
-import { createAlias } from "../src/store/aliases.js";
+import { createDomain } from "../src/store/domains.js";
+import { initSchema } from "../src/store/schema.js";
 
 console.log("=== SMXP Key Generator ===\n");
 
-const domain = prompt("Domain name (default: localhost):") || "localhost";
-const dbPath = prompt("Database path (default: ./data/smxp.db):") || "./data/smxp.db";
+const domain = (prompt("Domain name (default: localhost):") || "localhost")
+  .trim()
+  .toLowerCase();
+const dbPath =
+  prompt("Database path (default: ./data/smxp.db):") || "./data/smxp.db";
 
-const modeInput = prompt("What to generate?\n  1) Server keys only\n  2) Server keys + alias\nChoose (1/2):");
-
-let aliasName = null;
-if (modeInput === "2") {
-  aliasName = prompt("Alias name (e.g. alice):");
-  if (!aliasName || aliasName.trim() === "") {
-    console.error("[ERROR] Alias name cannot be empty.");
-    process.exit(1);
-  }
-  aliasName = aliasName.trim();
-}
+const modeInput = prompt(
+  "What to generate?\n  1) Server keys + domain\n  2) Inbox alias\n  3) Forward alias\nChoose (1/2/3):",
+);
 
 console.log(`\n[KEYGEN] Initializing database at ${dbPath}...`);
 initSchema(dbPath);
+createDomain(dbPath, domain);
 const db = getDb(dbPath);
 
-const existingServerKey = db.query(`SELECT value FROM server_config WHERE key = 'server_public_key'`).get();
+const existingServerKey = db
+  .query(`SELECT value FROM server_config WHERE key = 'server_public_key'`)
+  .get();
 
 if (!existingServerKey) {
-  console.log(`[KEYGEN] Generating server keys for ${domain}...`);
+  console.log(`[KEYGEN] Generating server keys...`);
   const serverKeys = generateKeyPair();
 
   db.run(`INSERT OR REPLACE INTO server_config (key, value) VALUES (?, ?)`, [
@@ -52,17 +55,26 @@ if (!existingServerKey) {
   console.log(`[KEYGEN] Server key ID: ${serverKeys.keyId}`);
   console.log(`[KEYGEN] Server key fingerprint: ${fp}`);
   console.log(`[KEYGEN] DNS TXT record for _smxpkey.${domain}:`);
-  console.log(`  v=SMXP1; k=${serverKeys.algorithm}; kid=${serverKeys.keyId}; fp=sha256:${fp}`);
+  console.log(
+    `  v=SMXP1; k=${serverKeys.algorithm}; kid=${serverKeys.keyId}; fp=sha256:${fp}`,
+  );
 } else {
   console.log(`[KEYGEN] Server keys already exist. Skipping.`);
 }
 
-if (aliasName) {
-  console.log(`[KEYGEN] Generating keys for alias "${aliasName}"...`);
-  const aliasKeys = generateKeyPair();
+if (modeInput === "2") {
+  const aliasName = prompt("Inbox alias name (e.g. alice):")
+    ?.trim()
+    .toLowerCase();
+  if (!aliasName) {
+    console.error("[ERROR] Alias name cannot be empty.");
+    process.exit(1);
+  }
 
-  createAlias(
+  const aliasKeys = generateKeyPair();
+  createInboxAlias(
     dbPath,
+    domain,
     aliasName,
     serializePublicKey(aliasKeys.publicKey),
     serializeSecretKey(aliasKeys.secretKey),
@@ -70,8 +82,29 @@ if (aliasName) {
     aliasKeys.algorithm,
   );
 
-  console.log(`[KEYGEN] Alias "${aliasName}" created with key ID: ${aliasKeys.keyId}`);
-  console.log(`[KEYGEN] Full address: ${aliasName}@${domain}`);
+  console.log(`[KEYGEN] Inbox alias "${aliasName}@${domain}" created.`);
+  console.log(`[KEYGEN] Alias key ID: ${aliasKeys.keyId}`);
+}
+
+if (modeInput === "3") {
+  const aliasName = prompt('Forward alias name (e.g. sales or "*"):')
+    ?.trim()
+    .toLowerCase();
+  const forwardTo = prompt(
+    `Forward target in ${domain} (e.g. alice@${domain}):`,
+  )
+    ?.trim()
+    .toLowerCase();
+
+  if (!aliasName || !forwardTo) {
+    console.error("[ERROR] Alias name and forward target are required.");
+    process.exit(1);
+  }
+
+  createForwardAlias(dbPath, domain, aliasName, forwardTo);
+  console.log(
+    `[KEYGEN] Forward alias "${aliasName}@${domain}" -> ${forwardTo} created.`,
+  );
 }
 
 console.log("\n[KEYGEN] Done.");

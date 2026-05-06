@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync, existsSync } from "fs";
-import { dirname } from "path";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 let db = null;
 

@@ -1,22 +1,27 @@
+import config from "../config.js";
+import { signObject } from "../crypto/sign.js";
 import { getAlias } from "../store/aliases.js";
 import { getDb } from "../store/db.js";
-import { signObject } from "../crypto/sign.js";
-import config from "../config.js";
 
-export function handleKeysRequest(aliasName) {
-  const alias = getAlias(config.dbPath, aliasName);
+export function handleKeysRequest(domainName, aliasName) {
+  const domain = domainName.trim().toLowerCase();
+  const aliasPart = aliasName.trim().toLowerCase();
+  const alias = getAlias(config.dbPath, domain, aliasPart);
 
-  if (!alias) {
-    return new Response(JSON.stringify({ error: "alias not found" }), {
+  if (!alias || alias.mode !== "inbox") {
+    return new Response(JSON.stringify({ error: "inbox alias not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // שליפת מפתח השרת כדי לחתום על התשובה
   const db = getDb(config.dbPath);
-  const serverKey = db.query(`SELECT value FROM server_config WHERE key = ?`).get("server_secret_key");
-  const serverKeyId = db.query(`SELECT value FROM server_config WHERE key = ?`).get("server_key_id");
+  const serverKey = db
+    .query(`SELECT value FROM server_config WHERE key = ?`)
+    .get("server_secret_key");
+  const serverKeyId = db
+    .query(`SELECT value FROM server_config WHERE key = ?`)
+    .get("server_key_id");
 
   if (!serverKey || !serverKeyId) {
     return new Response(JSON.stringify({ error: "server not configured" }), {
@@ -26,19 +31,16 @@ export function handleKeysRequest(aliasName) {
   }
 
   const payload = {
-    alias: aliasName,
-    domain: config.domain,
+    alias: aliasPart,
+    domain,
     public_key: alias.public_key,
     key_id: alias.key_id,
     algorithm: alias.algorithm,
   };
 
-  // חתימת השרת על התשובה
-  const serverSignature = signObject(payload, serverKey.value);
-
   const response = {
     ...payload,
-    server_signature: serverSignature,
+    server_signature: signObject(payload, serverKey.value),
     server_key_id: serverKeyId.value,
   };
 

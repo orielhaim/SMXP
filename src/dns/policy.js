@@ -5,8 +5,11 @@ export async function fetchPolicy(domain) {
     const name = `_smxp-policy.${domain}`;
     const response = await dohQuery(name, "TXT");
 
-    if (response.Status !== 0 || !response.Answer || response.Answer.length === 0) {
-      // ברירת מחדל — מקבלים הכל
+    if (
+      response.Status !== 0 ||
+      !response.Answer ||
+      response.Answer.length === 0
+    ) {
       return { requireSig: true, maxSize: 25 * 1024 * 1024, acceptFrom: "*" };
     }
 
@@ -19,7 +22,11 @@ export async function fetchPolicy(domain) {
 
 function parsePolicy(txt) {
   const parts = txt.split(";").map((s) => s.trim());
-  const policy = { requireSig: true, maxSize: 25 * 1024 * 1024, acceptFrom: "*" };
+  const policy = {
+    requireSig: true,
+    maxSize: 25 * 1024 * 1024,
+    acceptFrom: "*",
+  };
 
   for (const part of parts) {
     const [key, val] = part.split("=").map((s) => s.trim());
@@ -28,7 +35,8 @@ function parsePolicy(txt) {
         policy.requireSig = val === "yes";
         break;
       case "max-size":
-        policy.maxSize = parseInt(val) * (val.endsWith("m") ? 1024 * 1024 : 1);
+        policy.maxSize =
+          parseInt(val, 10) * (val.endsWith("m") ? 1024 * 1024 : 1);
         break;
       case "accept-from":
         policy.acceptFrom = val;

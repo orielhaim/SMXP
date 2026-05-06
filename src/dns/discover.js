@@ -1,5 +1,5 @@
-import { dohQuery } from "./doh.js";
 import config from "../config.js";
+import { dohQuery } from "./doh.js";
 
 const SVCB_PARAM_KEYS = {
   0: "mandatory",
@@ -89,7 +89,6 @@ function parseSvcbData(hexString) {
 }
 
 export async function discoverSmxp(domain) {
-  // בדיקה אם יש dev override
   const override = config.devOverrides[domain];
   if (override) {
     return {
@@ -104,7 +103,14 @@ export async function discoverSmxp(domain) {
   const response = await dohQuery(name, "SVCB");
 
   if (response.Status !== 0) {
-    const rcodes = ["NOERROR", "FORMERR", "SERVFAIL", "NXDOMAIN", "NOTIMP", "REFUSED"];
+    const rcodes = [
+      "NOERROR",
+      "FORMERR",
+      "SERVFAIL",
+      "NXDOMAIN",
+      "NOTIMP",
+      "REFUSED",
+    ];
     throw new Error(`DNS error: ${rcodes[response.Status] || response.Status}`);
   }
 
