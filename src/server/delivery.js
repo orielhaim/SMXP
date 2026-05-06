@@ -6,6 +6,7 @@ import {
 import { resolveDeliveryAddress } from "../store/addresses.js";
 import { domainExists } from "../store/domains.js";
 import { messageExists, storeMessage } from "../store/messages.js";
+import { eventBus } from "./eventbus.js";
 import { verifyDelegation } from "./verification.js";
 
 function jsonResponse(body, status) {
@@ -63,13 +64,10 @@ export async function deliverEnvelope(envelope, verifySender) {
 
     const deliveredTo = [];
     for (const delivery of deliveries) {
-      storeMessage(
-        normalizeEnvelopeForStorage(envelope),
-        "in",
-        1,
-        delivery.deliveredTo,
-      );
+      const msgForStorage = normalizeEnvelopeForStorage(envelope);
+      storeMessage(msgForStorage, "in", 1, delivery.deliveredTo);
       deliveredTo.push(delivery.deliveredTo);
+      eventBus.publish(delivery.deliveredTo, msgForStorage);
     }
 
     return jsonResponse(

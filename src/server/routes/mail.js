@@ -1,11 +1,11 @@
 import { Elysia, t } from "elysia";
 import { v4 as uuidv4 } from "uuid";
-import { getDb } from "../../store/db.js";
 import {
   buildPaginatedResponse,
   clampLimit,
   decodeCursor,
 } from "../../shared/cursor.js";
+import { getDb } from "../../store/db.js";
 import { authenticate, maybeRefreshToken } from "../auth.js";
 
 function jsonResponse(body, status = 200, extraHeaders = {}) {

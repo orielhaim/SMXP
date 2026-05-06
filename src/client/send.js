@@ -1,6 +1,7 @@
 import { discoverSmxp } from "../dns/discover.js";
 import { deliverEnvelope } from "../server/delivery.js";
-import { verifyLocalSender, verifyDelegation } from "../server/verification.js";
+import { eventBus } from "../server/eventbus.js";
+import { verifyDelegation, verifyLocalSender } from "../server/verification.js";
 import { parseAddress } from "../shared/address.js";
 import {
   createEnvelope,
@@ -67,12 +68,9 @@ export async function sendMessage({
     }
 
     const result = await response.json();
-    storeMessage(
-      normalizeEnvelopeForStorage(envelope),
-      "out",
-      1,
-      sender.address,
-    );
+    const msgForStorage = normalizeEnvelopeForStorage(envelope);
+    storeMessage(msgForStorage, "out", 1, sender.address);
+    eventBus.publish(sender.address, msgForStorage);
 
     console.log(`[SEND] Message ${envelope.id} delivered locally`);
     return { envelope, result };
@@ -101,7 +99,9 @@ export async function sendMessage({
 
   const result = await res.json();
 
-  storeMessage(normalizeEnvelopeForStorage(envelope), "out", 1, sender.address);
+  const msgForStorage = normalizeEnvelopeForStorage(envelope);
+  storeMessage(msgForStorage, "out", 1, sender.address);
+  eventBus.publish(sender.address, msgForStorage);
 
   console.log(`[SEND] Message ${envelope.id} delivered successfully`);
   return { envelope, result };

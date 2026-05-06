@@ -3,11 +3,11 @@ import { fingerprintPublicKey } from "../crypto/keys.js";
 import { verifyObjectSignature, verifySignature } from "../crypto/verify.js";
 import { discoverSmxp } from "../dns/discover.js";
 import { dohQuery } from "../dns/doh.js";
-import { getSignableBytes } from "../shared/envelope.js";
 import { parseAddress } from "../shared/address.js";
+import { getSignableBytes } from "../shared/envelope.js";
 import { getDb } from "../store/db.js";
-import { domainExists } from "../store/domains.js";
 import { getDelegationByDelegate } from "../store/delegations.js";
+import { domainExists } from "../store/domains.js";
 
 function shouldVerifyDnsFingerprint(domain) {
   return domain !== "localhost" && !resolveTarget(domain);

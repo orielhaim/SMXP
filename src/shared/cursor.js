@@ -1,4 +1,4 @@
-import { toBase64Url, fromBase64Url } from "./encoding.js";
+import { fromBase64Url, toBase64Url } from "./encoding.js";
 
 export function encodeCursor(row) {
   return toBase64Url(Buffer.from(`${row.created_at}:${row.id}`));

@@ -1,3 +1,4 @@
+import config from "../src/config.js";
 import {
   fingerprintPublicKey,
   generateKeyPair,
@@ -9,7 +10,6 @@ import { createForwardAlias, createInboxAlias } from "../src/store/aliases.js";
 import { getDb } from "../src/store/db.js";
 import { createDomain } from "../src/store/domains.js";
 import { initSchema } from "../src/store/schema.js";
-import config from "../src/config.js";
 
 console.log("=== SMXP Key Generator ===\n");
 

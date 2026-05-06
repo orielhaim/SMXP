@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "lint": "biome check . --write",
     "start": "bun src/main.js",
     "generate-keys": "bun scripts/generate-keys.js",
     "node1": "PORT=3001 DB=./data/node1.db bun src/main.js",

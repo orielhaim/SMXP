@@ -1,5 +1,4 @@
 import { Elysia, t } from "elysia";
-import { authenticate, maybeRefreshToken } from "../auth.js";
 import { parseAddress } from "../../shared/address.js";
 import {
   createDelegation,
@@ -7,6 +6,7 @@ import {
   getDelegations,
   getDelegationsGrantedTo,
 } from "../../store/delegations.js";
+import { authenticate, maybeRefreshToken } from "../auth.js";
 
 function jsonResponse(body, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
