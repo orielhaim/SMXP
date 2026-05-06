@@ -4,6 +4,7 @@ import {
   serializePublicKey,
   serializeSecretKey,
 } from "../src/crypto/keys.js";
+import { hashPassword } from "../src/crypto/password.js";
 import { createForwardAlias, createInboxAlias } from "../src/store/aliases.js";
 import { getDb } from "../src/store/db.js";
 import { createDomain } from "../src/store/domains.js";
@@ -72,10 +73,12 @@ if (modeInput === "2") {
   }
 
   const aliasKeys = generateKeyPair();
+  const password = prompt("Alias password:") || "";
   createInboxAlias(
     dbPath,
     domain,
     aliasName,
+    await hashPassword(password),
     serializePublicKey(aliasKeys.publicKey),
     serializeSecretKey(aliasKeys.secretKey),
     aliasKeys.keyId,

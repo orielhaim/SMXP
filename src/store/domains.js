@@ -21,3 +21,11 @@ export function getAllDomains(dbPath) {
     .query(`SELECT domain, created_at FROM domains ORDER BY domain`)
     .all();
 }
+
+export function deleteDomain(dbPath, domain) {
+  const db = getDb(dbPath);
+  const result = db
+    .query(`DELETE FROM domains WHERE domain = ? RETURNING domain`)
+    .get(domain.trim().toLowerCase());
+  return !!result;
+}

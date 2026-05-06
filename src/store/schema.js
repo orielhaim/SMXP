@@ -17,12 +17,22 @@ export function initSchema(dbPath) {
     )
   `);
 
+  const aliasColumns = db.query(`PRAGMA table_info(aliases)`).all();
+  const hasPasswordHash = aliasColumns.some(
+    (column) => column.name === "password_hash",
+  );
+
+  if (aliasColumns.length > 0 && !hasPasswordHash) {
+    db.run(`DROP TABLE aliases`);
+  }
+
   db.run(`
     CREATE TABLE IF NOT EXISTS aliases (
       domain      TEXT NOT NULL,
       alias       TEXT NOT NULL,
       mode        TEXT NOT NULL CHECK(mode IN ('inbox','forward')),
       forward_to  TEXT,
+      password_hash TEXT,
       public_key  TEXT,
       secret_key  TEXT,
       key_id      TEXT UNIQUE,

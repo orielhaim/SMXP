@@ -1,34 +1,29 @@
 import { Elysia } from "elysia";
 import config from "../config.js";
-import { getDb } from "../store/db.js";
 import { getAllDomains } from "../store/domains.js";
+import { ensureServerKeys } from "../store/server-config.js";
+import {
+  adminCreateAlias,
+  adminCreateDomain,
+  adminDeleteAlias,
+  adminDeleteDomain,
+  adminGetAlias,
+  adminGetDomain,
+  adminListAliases,
+  adminListDomains,
+  adminVerifyDomain,
+} from "./admin.js";
 import { handleKeysRequest } from "./keys-endpoint.js";
 import { handleReceive } from "./receive.js";
 
 export function handleServerKeyRequest() {
-  const db = getDb(config.dbPath);
-  const publicKey = db
-    .query(`SELECT value FROM server_config WHERE key = ?`)
-    .get("server_public_key");
-  const keyId = db
-    .query(`SELECT value FROM server_config WHERE key = ?`)
-    .get("server_key_id");
-  const algorithm = db
-    .query(`SELECT value FROM server_config WHERE key = ?`)
-    .get("server_algorithm");
-
-  if (!publicKey || !keyId) {
-    return new Response(JSON.stringify({ error: "server not configured" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const serverKeys = ensureServerKeys(config.dbPath);
 
   return new Response(
     JSON.stringify({
-      public_key: publicKey.value,
-      key_id: keyId.value,
-      algorithm: algorithm?.value || "ML-DSA-65",
+      public_key: serverKeys.public_key,
+      key_id: serverKeys.key_id,
+      algorithm: serverKeys.algorithm,
     }),
     {
       status: 200,
@@ -42,6 +37,25 @@ export function createServerApp() {
     .post("/.smxp/receive", ({ request }) => handleReceive(request))
     .get("/.well-known/smxp/keys/:domain/:alias", ({ params }) =>
       handleKeysRequest(params.domain, params.alias),
+    )
+    .get("/.smxp/admin/domains", ({ request }) => adminListDomains(request))
+    .post("/.smxp/admin/domains", ({ request }) => adminCreateDomain(request))
+    .get("/.smxp/admin/domains/:domain", ({ request, params }) =>
+      adminGetDomain(request, params.domain),
+    )
+    .post("/.smxp/admin/domains/:domain/verify", ({ request, params }) =>
+      adminVerifyDomain(request, params.domain),
+    )
+    .delete("/.smxp/admin/domains/:domain", ({ request, params }) =>
+      adminDeleteDomain(request, params.domain),
+    )
+    .get("/.smxp/admin/aliases", ({ request }) => adminListAliases(request))
+    .post("/.smxp/admin/aliases", ({ request }) => adminCreateAlias(request))
+    .get("/.smxp/admin/aliases/:domain/:alias", ({ request, params }) =>
+      adminGetAlias(request, params.domain, params.alias),
+    )
+    .delete("/.smxp/admin/aliases/:domain/:alias", ({ request, params }) =>
+      adminDeleteAlias(request, params.domain, params.alias),
     )
     .get("/.smxp/server-key", () => handleServerKeyRequest())
     .get("/.smxp/health", () => ({

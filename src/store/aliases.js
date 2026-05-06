@@ -6,6 +6,7 @@ export function createInboxAlias(
   dbPath,
   domain,
   alias,
+  passwordHash,
   publicKey,
   secretKey,
   keyId,
@@ -18,6 +19,9 @@ export function createInboxAlias(
   if (normalizedAlias === "*") {
     throw new Error("wildcard aliases can only be forwards");
   }
+  if (!passwordHash) {
+    throw new Error("alias password hash is required");
+  }
 
   createDomain(dbPath, normalizedDomain);
   db.run(
@@ -26,12 +30,21 @@ export function createInboxAlias(
       alias,
       mode,
       forward_to,
+      password_hash,
       public_key,
       secret_key,
       key_id,
       algorithm
-    ) VALUES (?, ?, 'inbox', NULL, ?, ?, ?, ?)`,
-    [normalizedDomain, normalizedAlias, publicKey, secretKey, keyId, algorithm],
+    ) VALUES (?, ?, 'inbox', NULL, ?, ?, ?, ?, ?)`,
+    [
+      normalizedDomain,
+      normalizedAlias,
+      passwordHash,
+      publicKey,
+      secretKey,
+      keyId,
+      algorithm,
+    ],
   );
 }
 
@@ -47,8 +60,10 @@ export function createForwardAlias(dbPath, domain, alias, forwardTo) {
 
   createDomain(dbPath, normalizedDomain);
   const targetAlias = getAlias(dbPath, target.domain, target.localPart);
-  if (!targetAlias) {
-    throw new Error(`forward target "${target.address}" does not exist`);
+  if (!targetAlias || targetAlias.mode !== "inbox") {
+    throw new Error(
+      `forward target "${target.address}" must be an inbox alias`,
+    );
   }
 
   db.run(
@@ -82,6 +97,26 @@ export function getAllAliases(dbPath) {
        ORDER BY domain, alias`,
     )
     .all();
+}
+
+export function getAliasesForDomain(dbPath, domain) {
+  const db = getDb(dbPath);
+  return db
+    .query(
+      `SELECT domain, alias, mode, forward_to, public_key, key_id, algorithm, created_at
+       FROM aliases
+       WHERE domain = ?
+       ORDER BY alias`,
+    )
+    .all(domain.trim().toLowerCase());
+}
+
+export function deleteAlias(dbPath, domain, alias) {
+  const db = getDb(dbPath);
+  const result = db
+    .query(`DELETE FROM aliases WHERE domain = ? AND alias = ? RETURNING alias`)
+    .get(domain.trim().toLowerCase(), alias.trim().toLowerCase());
+  return !!result;
 }
 
 export function getInboxAliasByAddress(dbPath, address) {

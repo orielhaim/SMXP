@@ -11,6 +11,8 @@ const config = {
   port: parseInt(process.env.SMXP_PORT || "3001", 10),
   dbPath: process.env.SMXP_DB || "./data/smxp.db",
   host: process.env.SMXP_HOST || "127.0.0.1",
+  adminApiKey:
+    process.env.SMXP_ADMIN_API_KEY || process.env.ADMIN_API_KEY || "",
 
   devOverrides: {
     "test1.orielhaim.com": { host: "127.0.0.1", port: 3001 },
