@@ -1,10 +1,8 @@
-# SMXP
-
-<div align="center">
+# SMXP - Simple Message eXchange Protocol
 
 **The messaging protocol of the future**
 
----
+<div align="center">
 
 Email was designed in the 1980s. Since then we've bolted on SPF, DKIM, DMARC, STARTTLS, IMAP, POP3, MIME, and a dozen other acronyms. each one a bandage on a system that was never meant to handle what we throw at it today.
 
@@ -14,15 +12,11 @@ One protocol. One server. One API. Everything HTTP. Everything JSON. Everything 
 
 </div>
 
----
-
 ## Why
 
 Every year someone writes "email is broken" and proposes another layer on top of SMTP. Another extension. Another workaround. The result: a Frankenstein of protocols where sending a simple message requires negotiating with half a dozen systems (MTA, MDA, MUA, SPF, DKIM, DMARC, IMAP, POP3...)
 
 SMXP starts from zero. No backwards compatibility with a 40-year-old protocol. No MIME. No headers soup. Just a clean and modern messaging system designed for how people and machines actually communicate today.
-
----
 
 ## How it works
 
@@ -109,8 +103,6 @@ bun run cli
 bun run node1
 ```
 
----
-
 ## Roadmap
 
 - **Universal database support** - pluggable storage layer via [Drizzle ORM](https://orm.drizzle.team). bring your own database, SMXP adapts.
@@ -121,13 +113,9 @@ bun run node1
 
 - **SDK & libraries** - lightweight packages for building on top of SMXP in any language.
 
----
-
 ## Contributing
 
 If you're tired of email being stuck in 1985 and want to help build what comes next - PRs are open. Check the issues, pick something, or propose something new.
-
----
 
 ## License
 
