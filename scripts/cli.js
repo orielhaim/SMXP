@@ -11,7 +11,7 @@ import { getDb } from "../src/store/db.js";
 import { createDomain } from "../src/store/domains.js";
 import { initSchema } from "../src/store/schema.js";
 
-console.log("=== SMXP Key Generator ===\n");
+console.log("=== SMXP CLI ===\n");
 
 const domain = (prompt("Domain name (default: localhost):") || "localhost")
   .trim()

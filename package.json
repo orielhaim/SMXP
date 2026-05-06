@@ -6,7 +6,7 @@
   "scripts": {
     "lint": "biome check . --write",
     "start": "bun src/main.js",
-    "generate-keys": "bun scripts/generate-keys.js",
+    "cli": "bun scripts/cli.js",
     "node1": "PORT=3001 DB=./data/node1.db bun src/main.js",
     "node2": "PORT=3002 DB=./data/node2.db bun src/main.js",
     "send1to2": "PORT=3001 DB=./data/node1.db bun src/main.js send bob@test1.orielhaim.com alice@test2.orielhaim.com \"Hello from node1!\"",
