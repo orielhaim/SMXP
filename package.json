@@ -1,0 +1,26 @@
+{
+  "name": "smxp",
+  "module": "index.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun src/main.js",
+    "generate-keys": "bun scripts/generate-keys.js",
+    "node1": "SMXP_DOMAIN=test1.orielhaim.com SMXP_PORT=3001 SMXP_DB=./data/node1.db bun src/main.js",
+    "node2": "SMXP_DOMAIN=test2.orielhaim.com SMXP_PORT=3002 SMXP_DB=./data/node2.db bun src/main.js",
+    "send1to2": "SMXP_DOMAIN=test1.orielhaim.com SMXP_PORT=3001 SMXP_DB=./data/node1.db bun src/main.js send bob@test1.orielhaim.com alice@test2.orielhaim.com \"Hello from node1!\"",
+    "send2to1": "SMXP_DOMAIN=test2.orielhaim.com SMXP_PORT=3002 SMXP_DB=./data/node2.db bun src/main.js send alice@test2.orielhaim.com bob@test1.orielhaim.com \"Hello from node2!\""
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.14",
+    "@types/bun": "^1.3.13"
+  },
+  "peerDependencies": {
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@noble/post-quantum": "^0.6.1",
+    "dns-packet": "^5.6.1",
+    "elysia": "^1.4.28"
+  }
+}
