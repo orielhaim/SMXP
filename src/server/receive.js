@@ -91,6 +91,7 @@ async function fetchAliasPublicKey(domain, alias) {
 }
 
 export async function handleReceive(req) {
+  const receivedAt = Math.floor(Date.now() / 1000);
   let envelope;
   try {
     envelope = await req.json();
@@ -146,6 +147,13 @@ export async function handleReceive(req) {
   if (messageExists(config.dbPath, envelope.id)) {
     return new Response(JSON.stringify({ error: "duplicate message" }), {
       status: 409,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (typeof envelope.expires === "number" && receivedAt > envelope.expires) {
+    return new Response(JSON.stringify({ error: "message expired" }), {
+      status: 410,
       headers: { "Content-Type": "application/json" },
     });
   }

@@ -31,6 +31,7 @@ export function initSchema(dbPath) {
       "to"        TEXT NOT NULL,
       subject     TEXT,
       body        TEXT NOT NULL,
+      expires_at  INTEGER,
       references_json TEXT,
       signature   TEXT NOT NULL,
       key_id      TEXT NOT NULL,

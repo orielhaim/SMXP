@@ -23,6 +23,7 @@ function parseReferences(referencesJson) {
 function mapMessageRow(row) {
   return {
     ...row,
+    expires: row.expires_at,
     references: parseReferences(row.references_json),
   };
 }
@@ -39,11 +40,12 @@ export function storeMessage(dbPath, envelope, direction, verified = 0) {
       "to",
       subject,
       body,
+      expires_at,
       references_json,
       signature,
       key_id,
       verified
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       envelope.id,
       direction,
@@ -53,6 +55,7 @@ export function storeMessage(dbPath, envelope, direction, verified = 0) {
       envelope.to,
       envelope.subject,
       envelope.body,
+      envelope.expires ?? null,
       serializeReferences(envelope.references),
       envelope.signature,
       envelope.key_id,

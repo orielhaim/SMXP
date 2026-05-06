@@ -8,6 +8,10 @@ function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function isValidTimestamp(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
 function normalizeReferences(type, references) {
   if (references == null) {
     if (type === "edit") {
@@ -52,6 +56,7 @@ export function createEnvelope({
   name,
   subject,
   body,
+  expires,
   type = "message",
   references,
   secretKey,
@@ -59,6 +64,10 @@ export function createEnvelope({
 }) {
   if (!MESSAGE_TYPES.includes(type)) {
     throw new Error(`unsupported envelope type "${type}"`);
+  }
+
+  if (expires !== undefined && !isValidTimestamp(expires)) {
+    throw new Error("expires must be a non-negative integer timestamp");
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
@@ -73,6 +82,7 @@ export function createEnvelope({
     normalizedName || "",
     timestamp,
     type,
+    expires ?? null,
     normalizedReferences ?? null,
     normalizedSubject,
     normalizedBody,
@@ -94,6 +104,10 @@ export function createEnvelope({
 
   if (normalizedName) {
     envelope.name = normalizedName;
+  }
+
+  if (expires !== undefined) {
+    envelope.expires = expires;
   }
 
   if (normalizedReferences !== undefined) {
@@ -149,6 +163,10 @@ export function validateEnvelope(envelope) {
     return "body must be a string";
   }
 
+  if (envelope.expires !== undefined && !isValidTimestamp(envelope.expires)) {
+    return "expires must be a non-negative integer timestamp";
+  }
+
   if (
     envelope.content_type !== undefined &&
     typeof envelope.content_type !== "string"
@@ -177,6 +195,7 @@ export function normalizeEnvelopeForStorage(envelope) {
     name: typeof envelope.name === "string" ? envelope.name : null,
     subject: typeof envelope.subject === "string" ? envelope.subject : "",
     body: typeof envelope.body === "string" ? envelope.body : "",
+    expires: Number.isInteger(envelope.expires) ? envelope.expires : null,
     references: envelope.references === undefined ? null : envelope.references,
   };
 }

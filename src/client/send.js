@@ -14,6 +14,7 @@ export async function sendMessage({
   name,
   subject,
   body,
+  expires,
   type,
   references,
 }) {
@@ -30,6 +31,7 @@ export async function sendMessage({
     name,
     subject,
     body,
+    expires,
     type,
     references,
     secretKey: alias.secret_key,
