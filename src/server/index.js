@@ -15,6 +15,9 @@ import {
 } from "./admin.js";
 import { handleKeysRequest } from "./keys-endpoint.js";
 import { handleReceive } from "./receive.js";
+import { authRoutes } from "./routes/auth.js";
+import { mailRoutes } from "./routes/mail.js";
+import { accountRoutes } from "./routes/account.js";
 
 export function handleServerKeyRequest() {
   const serverKeys = ensureServerKeys();
@@ -34,6 +37,9 @@ export function handleServerKeyRequest() {
 
 export function createServerApp() {
   return new Elysia()
+    .use(authRoutes())
+    .use(mailRoutes())
+    .use(accountRoutes())
     .post("/.smxp/receive", ({ request }) => handleReceive(request))
     .get("/.well-known/smxp/keys/:domain/:alias", ({ params }) =>
       handleKeysRequest(params.domain, params.alias),

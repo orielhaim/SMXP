@@ -17,15 +17,6 @@ export function initSchema() {
     )
   `);
 
-  const aliasColumns = db.query(`PRAGMA table_info(aliases)`).all();
-  const hasPasswordHash = aliasColumns.some(
-    (column) => column.name === "password_hash",
-  );
-
-  if (aliasColumns.length > 0 && !hasPasswordHash) {
-    db.run(`DROP TABLE aliases`);
-  }
-
   db.run(`
     CREATE TABLE IF NOT EXISTS aliases (
       domain      TEXT NOT NULL,
@@ -47,6 +38,30 @@ export function initSchema() {
       ),
       CHECK (alias != '*' OR mode = 'forward')
     )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS tokens (
+      id          TEXT PRIMARY KEY,
+      hash        TEXT NOT NULL UNIQUE,
+      alias       TEXT NOT NULL,
+      domain      TEXT NOT NULL,
+      type        TEXT NOT NULL CHECK(type IN ('session', 'apikey')),
+      name        TEXT,
+      permissions TEXT NOT NULL DEFAULT 'full',
+      expires_at  INTEGER,
+      created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
+      last_used   INTEGER,
+      FOREIGN KEY (alias, domain) REFERENCES aliases(alias, domain)
+    )
+  `);
+
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(hash)
+  `);
+
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_tokens_alias_domain ON tokens(alias, domain)
   `);
 
   db.run(`

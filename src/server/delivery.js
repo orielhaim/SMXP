@@ -34,14 +34,14 @@ export async function deliverEnvelope(envelope, verifySender) {
     return jsonResponse({ error: "recipient domain not on this server" }, 404);
   }
 
-  let delivery;
+  let deliveries;
   try {
-    delivery = resolveDeliveryAlias(to.address);
+    deliveries = resolveDeliveryAlias(to.address);
   } catch (err) {
     return jsonResponse({ error: err.message }, 400);
   }
 
-  if (!delivery) {
+  if (!deliveries || deliveries.length === 0) {
     return jsonResponse({ error: "recipient alias not found" }, 404);
   }
 
@@ -55,19 +55,24 @@ export async function deliverEnvelope(envelope, verifySender) {
 
   try {
     await verifySender(envelope, from);
-    storeMessage(
-      normalizeEnvelopeForStorage(envelope),
-      "in",
-      1,
-      delivery.deliveredTo,
-    );
+
+    const deliveredTo = [];
+    for (const delivery of deliveries) {
+      storeMessage(
+        normalizeEnvelopeForStorage(envelope),
+        "in",
+        1,
+        delivery.deliveredTo,
+      );
+      deliveredTo.push(delivery.deliveredTo);
+    }
 
     return jsonResponse(
       {
         status: "accepted",
         id: envelope.id,
-        original_to: delivery.originalAddress,
-        delivered_to: delivery.deliveredTo,
+        original_to: deliveries[0].originalAddress,
+        delivered_to: deliveredTo,
       },
       201,
     );

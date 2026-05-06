@@ -308,23 +308,52 @@ export async function adminCreateAlias(request) {
       );
     }
 
-    const target = parseAddress(body.forward_to);
-    if (target.domain !== domain) {
+    const forwardList = Array.isArray(body.forward_to)
+      ? body.forward_to
+      : [body.forward_to];
+
+    if (forwardList.length === 0) {
       return jsonResponse(
-        { error: "forward target must belong to the same domain" },
+        { error: "at least one forward target is required" },
         400,
       );
     }
 
-    const targetAlias = getAlias(target.domain, target.localPart);
-    if (!targetAlias || targetAlias.mode !== "inbox") {
-      return jsonResponse(
-        { error: "forward target must be an inbox alias" },
-        targetAlias ? 400 : 404,
-      );
+    const normalizedTargets = [];
+    for (const addr of forwardList) {
+      let target;
+      try {
+        target = parseAddress(addr);
+      } catch {
+        return jsonResponse(
+          { error: `invalid forward target address "${addr}"` },
+          400,
+        );
+      }
+
+      if (target.domain !== domain) {
+        return jsonResponse(
+          {
+            error: `forward target "${target.address}" must belong to the same domain`,
+          },
+          400,
+        );
+      }
+
+      const targetAlias = getAlias(target.domain, target.localPart);
+      if (!targetAlias || targetAlias.mode !== "inbox") {
+        return jsonResponse(
+          {
+            error: `forward target "${target.address}" must be an inbox alias`,
+          },
+          targetAlias ? 400 : 404,
+        );
+      }
+
+      normalizedTargets.push(target.address);
     }
 
-    createForwardAlias(domain, alias, passwordHash, target.address);
+    createForwardAlias(domain, alias, normalizedTargets);
 
     return jsonResponse(
       {
@@ -332,7 +361,7 @@ export async function adminCreateAlias(request) {
         domain,
         alias,
         mode,
-        forward_to: target.address,
+        forward_to: normalizedTargets,
       },
       201,
     );
