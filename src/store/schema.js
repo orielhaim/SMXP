@@ -25,10 +25,13 @@ export function initSchema(dbPath) {
     CREATE TABLE IF NOT EXISTS messages (
       id          TEXT PRIMARY KEY,
       direction   TEXT NOT NULL CHECK(direction IN ('in','out')),
+      type        TEXT NOT NULL DEFAULT 'message' CHECK(type IN ('message','edit','receipt')),
+      name        TEXT,
       "from"      TEXT NOT NULL,
       "to"        TEXT NOT NULL,
       subject     TEXT,
       body        TEXT NOT NULL,
+      references_json TEXT,
       signature   TEXT NOT NULL,
       key_id      TEXT NOT NULL,
       verified    INTEGER DEFAULT 0,

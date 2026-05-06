@@ -1,17 +1,20 @@
-import { discoverSmxp } from "../dns/discover.js";
-import { resolveTarget, buildBaseUrl } from "../client/resolve.js";
-import { verifySignature, verifyObjectSignature } from "../crypto/verify.js";
-import { fingerprintPublicKey } from "../crypto/keys.js";
-import { getSignableBytes } from "../shared/envelope.js";
-import { getAlias } from "../store/aliases.js";
-import { storeMessage, messageExists } from "../store/messages.js";
-import { dohQuery } from "../dns/doh.js";
+import { buildBaseUrl, resolveTarget } from "../client/resolve.js";
 import config from "../config.js";
+import { fingerprintPublicKey } from "../crypto/keys.js";
+import { verifyObjectSignature, verifySignature } from "../crypto/verify.js";
+import { discoverSmxp } from "../dns/discover.js";
+import { dohQuery } from "../dns/doh.js";
+import {
+  getSignableBytes,
+  normalizeEnvelopeForStorage,
+  validateEnvelope,
+} from "../shared/envelope.js";
+import { getAlias } from "../store/aliases.js";
+import { messageExists, storeMessage } from "../store/messages.js";
 
 async function fetchServerPublicKey(domain) {
   const resolved = resolveTarget(domain);
 
-  // שליפת המפתח מה-endpoint
   let serverKeyInfo;
   if (resolved) {
     const url = `${buildBaseUrl(resolved.host, resolved.port)}/.smxp/server-key`;
@@ -19,7 +22,6 @@ async function fetchServerPublicKey(domain) {
     if (!res.ok) throw new Error(`Failed to fetch server key from ${domain}`);
     serverKeyInfo = await res.json();
   } else {
-    // production — שליפה מהשרת המרוחק (אחרי discovery)
     const target = await discoverSmxp(domain);
     const url = `${buildBaseUrl(target.host, target.port)}/.smxp/server-key`;
     const res = await fetch(url);
@@ -27,9 +29,7 @@ async function fetchServerPublicKey(domain) {
     serverKeyInfo = await res.json();
   }
 
-  // אימות fingerprint מול DNS
   if (!resolved) {
-    // ב-production: שולפים fingerprint מ-DNS ומאמתים
     const dnsFingerprint = await fetchDnsFingerprint(domain);
     const actualFingerprint = fingerprintPublicKey(serverKeyInfo.public_key);
 
@@ -63,7 +63,6 @@ async function fetchDnsFingerprint(domain) {
     const [key, ...rest] = part.split("=");
     if (key.trim() === "fp") {
       const val = rest.join("=").trim();
-      // פורמט: sha256:base64url
       if (val.startsWith("sha256:")) {
         return val.slice(7);
       }
@@ -102,29 +101,24 @@ export async function handleReceive(req) {
     });
   }
 
-  // ולידציה בסיסית
-  if (
-    !envelope.version ||
-    !envelope.id ||
-    !envelope.from ||
-    !envelope.to ||
-    !envelope.signature ||
-    !envelope.key_id
-  ) {
-    return new Response(JSON.stringify({ error: "missing required fields" }), {
+  const validationError = validateEnvelope(envelope);
+  if (validationError) {
+    return new Response(JSON.stringify({ error: validationError }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  if (envelope.version !== "SMXP/1.0") {
-    return new Response(JSON.stringify({ error: "unsupported version" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+  if (typeof envelope.from !== "string" || typeof envelope.to !== "string") {
+    return new Response(
+      JSON.stringify({ error: "from and to must be strings" }),
+      {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 
-  // בדיקה שה-to שייך לנו
   const toAlias = envelope.to.split("@")[0];
   const toDomain = envelope.to.split("@")[1];
 
@@ -149,7 +143,6 @@ export async function handleReceive(req) {
     );
   }
 
-  // Replay protection — בדיקת ID
   if (messageExists(config.dbPath, envelope.id)) {
     return new Response(JSON.stringify({ error: "duplicate message" }), {
       status: 409,
@@ -157,18 +150,15 @@ export async function handleReceive(req) {
     });
   }
 
-  // === אימות שכבה 1+2+3 ===
   const senderDomain = envelope.from.split("@")[1];
   const senderAlias = envelope.from.split("@")[0];
 
   try {
-    // שכבה 1: שליפת מפתח השרת מ-DNS (או dev endpoint)
     const serverKeyInfo = await fetchServerPublicKey(senderDomain);
     console.log(
       `[VERIFY] Got server key for ${senderDomain}: kid=${serverKeyInfo.key_id}`,
     );
 
-    // שכבה 2: שליפת מפתח ה-alias מהשרת השולח + אימות חתימת השרת
     const aliasKeyResponse = await fetchAliasPublicKey(
       senderDomain,
       senderAlias,
@@ -177,7 +167,6 @@ export async function handleReceive(req) {
       `[VERIFY] Got alias key for ${senderAlias}@${senderDomain}: kid=${aliasKeyResponse.key_id}`,
     );
 
-    // אימות שחתימת השרת על תשובת המפתח תקינה
     const { server_signature, server_key_id, ...aliasPayload } =
       aliasKeyResponse;
     const serverSigValid = verifyObjectSignature(
@@ -198,7 +187,6 @@ export async function handleReceive(req) {
     }
     console.log(`[VERIFY] Server signature valid`);
 
-    // שכבה 3: אימות חתימת ההודעה עם מפתח ה-alias
     const signableBytes = getSignableBytes(envelope);
     const msgSigValid = verifySignature(
       signableBytes,
@@ -218,8 +206,7 @@ export async function handleReceive(req) {
     }
     console.log(`[VERIFY] Message signature valid! Storing message.`);
 
-    // שמירה
-    storeMessage(config.dbPath, envelope, "in", 1);
+    storeMessage(config.dbPath, normalizeEnvelopeForStorage(envelope), "in", 1);
 
     return new Response(
       JSON.stringify({ status: "accepted", id: envelope.id }),
