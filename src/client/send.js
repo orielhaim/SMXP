@@ -6,7 +6,7 @@ import {
   createEnvelope,
   normalizeEnvelopeForStorage,
 } from "../shared/envelope.js";
-import { getInboxAliasByAddress } from "../store/aliases.js";
+import { getInboxAddressByAddress } from "../store/addresses.js";
 import { domainExists } from "../store/domains.js";
 import { storeMessage } from "../store/messages.js";
 import { buildBaseUrl, resolveTarget } from "./resolve.js";
@@ -19,14 +19,18 @@ export async function sendMessage({
   body,
   expires,
   type,
-  references,
+  conversation_id,
+  in_reply_to,
+  content_type,
 }) {
   const sender = parseAddress(from);
   const recipient = parseAddress(to);
-  const alias = getInboxAliasByAddress(sender.address);
+  const address = getInboxAddressByAddress(sender.address);
 
-  if (!alias) {
-    throw new Error(`Inbox alias "${sender.address}" not found in local store`);
+  if (!address) {
+    throw new Error(
+      `Inbox address "${sender.address}" not found in local store`,
+    );
   }
 
   const envelope = createEnvelope({
@@ -37,15 +41,17 @@ export async function sendMessage({
     body,
     expires,
     type,
-    references,
-    secretKey: alias.secret_key,
-    keyId: alias.key_id,
+    conversation_id,
+    in_reply_to,
+    content_type,
+    secretKey: address.secret_key,
+    keyId: address.key_id,
   });
 
   if (domainExists(recipient.domain)) {
     console.log(`[SEND] Local delivery to ${recipient.address}`);
     const response = await deliverEnvelope(envelope, (message) =>
-      verifyLocalSender(message, alias),
+      verifyLocalSender(message, address),
     );
 
     if (!response.ok) {

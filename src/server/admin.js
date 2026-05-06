@@ -9,13 +9,13 @@ import { hashPassword } from "../crypto/password.js";
 import { discoverSmxp } from "../dns/discover.js";
 import { parseAddress } from "../shared/address.js";
 import {
-  createForwardAlias,
-  createInboxAlias,
-  deleteAlias,
-  getAlias,
-  getAliasesForDomain,
-  getAllAliases,
-} from "../store/aliases.js";
+  createForwardAddress,
+  createInboxAddress,
+  deleteAddress,
+  getAddress,
+  getAddressesForDomain,
+  getAllAddresses,
+} from "../store/addresses.js";
 import {
   createDomain,
   deleteDomain,
@@ -226,24 +226,24 @@ export async function adminDeleteDomain(request, domainName) {
   }
 }
 
-export async function adminListAliases(request) {
+export async function adminListAddresses(request) {
   const auth = requireAdmin(request);
   if (auth) return auth;
 
   try {
     const url = new URL(request.url);
     const domain = url.searchParams.get("domain");
-    const aliases = domain
-      ? getAliasesForDomain(normalizeDomain(domain))
-      : getAllAliases();
+    const addresses = domain
+      ? getAddressesForDomain(normalizeDomain(domain))
+      : getAllAddresses();
 
-    return jsonResponse({ aliases });
+    return jsonResponse({ addresses });
   } catch (err) {
     return jsonResponse({ error: err.message }, 400);
   }
 }
 
-export async function adminCreateAlias(request) {
+export async function adminCreateAddress(request) {
   const auth = requireAdmin(request);
   if (auth) return auth;
 
@@ -263,21 +263,21 @@ export async function adminCreateAlias(request) {
       return jsonResponse({ error: "domain does not exist" }, 404);
     }
 
-    if (getAlias(domain, alias)) {
-      return jsonResponse({ error: "alias already exists" }, 409);
+    if (getAddress(domain, alias)) {
+      return jsonResponse({ error: "address already exists" }, 409);
     }
 
     if (mode === "inbox") {
       if (alias === "*") {
         return jsonResponse(
-          { error: "wildcard aliases can only be forwards" },
+          { error: "wildcard addresses can only be forwards" },
           400,
         );
       }
 
       const keys = generateKeyPair();
       const publicKey = serializePublicKey(keys.publicKey);
-      createInboxAlias(
+      createInboxAddress(
         domain,
         alias,
         passwordHash,
@@ -303,7 +303,7 @@ export async function adminCreateAlias(request) {
 
     if (!body.forward_to) {
       return jsonResponse(
-        { error: "forward_to is required for forward aliases" },
+        { error: "forward_to is required for forward addresses" },
         400,
       );
     }
@@ -340,20 +340,20 @@ export async function adminCreateAlias(request) {
         );
       }
 
-      const targetAlias = getAlias(target.domain, target.localPart);
-      if (!targetAlias || targetAlias.mode !== "inbox") {
+      const targetAddress = getAddress(target.domain, target.localPart);
+      if (!targetAddress || targetAddress.mode !== "inbox") {
         return jsonResponse(
           {
-            error: `forward target "${target.address}" must be an inbox alias`,
+            error: `forward target "${target.address}" must be an inbox address`,
           },
-          targetAlias ? 400 : 404,
+          targetAddress ? 400 : 404,
         );
       }
 
       normalizedTargets.push(target.address);
     }
 
-    createForwardAlias(domain, alias, normalizedTargets);
+    createForwardAddress(domain, alias, normalizedTargets);
 
     return jsonResponse(
       {
@@ -370,36 +370,36 @@ export async function adminCreateAlias(request) {
   }
 }
 
-export async function adminGetAlias(request, domainName, aliasName) {
+export async function adminGetAddress(request, domainName, aliasName) {
   const auth = requireAdmin(request);
   if (auth) return auth;
 
   try {
     const domain = normalizeDomain(domainName);
     const alias = normalizeAlias(aliasName);
-    const row = getAlias(domain, alias);
+    const row = getAddress(domain, alias);
     if (!row) {
-      return jsonResponse({ error: "alias not found" }, 404);
+      return jsonResponse({ error: "address not found" }, 404);
     }
 
-    const safeAlias = { ...row };
-    delete safeAlias.password_hash;
-    delete safeAlias.secret_key;
-    return jsonResponse({ alias: safeAlias });
+    const safeAddress = { ...row };
+    delete safeAddress.password_hash;
+    delete safeAddress.secret_key;
+    return jsonResponse({ address: safeAddress });
   } catch (err) {
     return jsonResponse({ error: err.message }, 400);
   }
 }
 
-export async function adminDeleteAlias(request, domainName, aliasName) {
+export async function adminDeleteAddress(request, domainName, aliasName) {
   const auth = requireAdmin(request);
   if (auth) return auth;
 
   try {
     const domain = normalizeDomain(domainName);
     const alias = normalizeAlias(aliasName);
-    if (!deleteAlias(domain, alias)) {
-      return jsonResponse({ error: "alias not found" }, 404);
+    if (!deleteAddress(domain, alias)) {
+      return jsonResponse({ error: "address not found" }, 404);
     }
 
     return jsonResponse({ status: "deleted", domain, alias });

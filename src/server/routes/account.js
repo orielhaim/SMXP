@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { hashPassword, verifyPassword } from "../../crypto/password.js";
-import { getAlias } from "../../store/aliases.js";
+import { getAddress } from "../../store/addresses.js";
 import { getDb } from "../../store/db.js";
 import { deleteToken, getTokensByAlias } from "../../store/tokens.js";
 import { authenticate, maybeRefreshToken } from "../auth.js";
@@ -25,19 +25,19 @@ export function accountRoutes() {
       const authInfo = authenticate(request);
       if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
 
-      const alias = getAlias(authInfo.domain, authInfo.alias);
-      if (!alias) return jsonResponse({ error: "alias not found" }, 404);
+      const address = getAddress(authInfo.domain, authInfo.alias);
+      if (!address) return jsonResponse({ error: "address not found" }, 404);
 
       return authedResponse(
         {
-          alias: alias.alias,
-          domain: alias.domain,
-          address: `${alias.alias}@${alias.domain}`,
-          mode: alias.mode,
-          public_key: alias.public_key,
-          key_id: alias.key_id,
-          algorithm: alias.algorithm,
-          created_at: alias.created_at,
+          alias: address.alias,
+          domain: address.domain,
+          address: `${address.alias}@${address.domain}`,
+          mode: address.mode,
+          public_key: address.public_key,
+          key_id: address.key_id,
+          algorithm: address.algorithm,
+          created_at: address.created_at,
         },
         authInfo,
       );
@@ -49,12 +49,12 @@ export function accountRoutes() {
         const authInfo = authenticate(request);
         if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
 
-        const alias = getAlias(authInfo.domain, authInfo.alias);
-        if (!alias) return jsonResponse({ error: "alias not found" }, 404);
+        const address = getAddress(authInfo.domain, authInfo.alias);
+        if (!address) return jsonResponse({ error: "address not found" }, 404);
 
         const valid = await verifyPassword(
           body.current_password,
-          alias.password_hash,
+          address.password_hash,
         );
         if (!valid) {
           return jsonResponse({ error: "current password is incorrect" }, 403);
@@ -63,7 +63,7 @@ export function accountRoutes() {
         const newHash = await hashPassword(body.new_password);
         const db = getDb();
         db.run(
-          `UPDATE aliases SET password_hash = ? WHERE alias = ? AND domain = ?`,
+          `UPDATE addresses SET password_hash = ? WHERE alias = ? AND domain = ?`,
           [newHash, authInfo.alias, authInfo.domain],
         );
 

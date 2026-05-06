@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { signMessage } from "../crypto/sign.js";
 import { toBase64Url } from "./encoding.js";
 
-export const MESSAGE_TYPES = ["message", "edit", "receipt"];
+export const MESSAGE_TYPES = ["message", "edit", "receipt", "delete"];
 
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -10,44 +10,6 @@ function isNonEmptyString(value) {
 
 function isValidTimestamp(value) {
   return Number.isInteger(value) && value >= 0;
-}
-
-function normalizeReferences(type, references) {
-  if (references == null) {
-    if (type === "edit") {
-      throw new Error(`type "${type}" requires a reference id`);
-    }
-    if (type === "receipt") {
-      throw new Error(`type "${type}" requires at least one reference id`);
-    }
-    return undefined;
-  }
-
-  if (type === "receipt") {
-    if (!Array.isArray(references) || references.length === 0) {
-      throw new Error(
-        `type "${type}" requires references to be a non-empty array`,
-      );
-    }
-
-    for (const reference of references) {
-      if (!isNonEmptyString(reference)) {
-        throw new Error(
-          `type "${type}" requires every reference id to be a non-empty string`,
-        );
-      }
-    }
-
-    return references;
-  }
-
-  if (!isNonEmptyString(references)) {
-    throw new Error(
-      `type "${type}" requires references to be a non-empty string`,
-    );
-  }
-
-  return references;
 }
 
 export function createEnvelope({
@@ -58,7 +20,9 @@ export function createEnvelope({
   body,
   expires,
   type = "message",
-  references,
+  conversation_id,
+  in_reply_to,
+  content_type = "text",
   secretKey,
   keyId,
 }) {
@@ -70,11 +34,19 @@ export function createEnvelope({
     throw new Error("expires must be a non-negative integer timestamp");
   }
 
+  if (!isNonEmptyString(conversation_id)) {
+    throw new Error(
+      "conversation_id is required and must be a non-empty string",
+    );
+  }
+
   const timestamp = Math.floor(Date.now() / 1000);
   const normalizedName = isNonEmptyString(name) ? name.trim() : undefined;
-  const normalizedSubject = subject || "";
-  const normalizedBody = body || "";
-  const normalizedReferences = normalizeReferences(type, references);
+  const normalizedSubject = subject || null;
+  const normalizedBody = body || null;
+  const normalizedInReplyTo = isNonEmptyString(in_reply_to)
+    ? in_reply_to.trim()
+    : null;
 
   const preimage = JSON.stringify([
     from,
@@ -83,9 +55,11 @@ export function createEnvelope({
     timestamp,
     type,
     expires ?? null,
-    normalizedReferences ?? null,
-    normalizedSubject,
-    normalizedBody,
+    conversation_id,
+    normalizedInReplyTo,
+    content_type,
+    normalizedSubject ?? "",
+    normalizedBody ?? "",
   ]);
   const hash = createHash("sha256").update(preimage).digest();
   const id = toBase64Url(hash);
@@ -97,22 +71,15 @@ export function createEnvelope({
     to,
     timestamp,
     type,
-    subject: normalizedSubject,
-    content_type: "text/plain",
-    body: normalizedBody,
+    conversation_id,
+    content_type,
   };
 
-  if (normalizedName) {
-    envelope.name = normalizedName;
-  }
-
-  if (expires !== undefined) {
-    envelope.expires = expires;
-  }
-
-  if (normalizedReferences !== undefined) {
-    envelope.references = normalizedReferences;
-  }
+  if (normalizedName) envelope.name = normalizedName;
+  if (normalizedSubject !== null) envelope.subject = normalizedSubject;
+  if (normalizedBody !== null) envelope.body = normalizedBody;
+  if (normalizedInReplyTo !== null) envelope.in_reply_to = normalizedInReplyTo;
+  if (expires !== undefined) envelope.expires = expires;
 
   const signable = JSON.stringify(envelope);
   const signableBytes = new TextEncoder().encode(signable);
@@ -142,7 +109,8 @@ export function validateEnvelope(envelope) {
     !envelope.from ||
     !envelope.to ||
     !envelope.signature ||
-    !envelope.key_id
+    !envelope.key_id ||
+    !envelope.conversation_id
   ) {
     return "missing required fields";
   }
@@ -174,15 +142,16 @@ export function validateEnvelope(envelope) {
     return "content_type must be a string";
   }
 
+  if (
+    envelope.in_reply_to !== undefined &&
+    !isNonEmptyString(envelope.in_reply_to)
+  ) {
+    return "in_reply_to must be a non-empty string";
+  }
+
   const type = envelope.type ?? "message";
   if (!MESSAGE_TYPES.includes(type)) {
     return "unsupported message type";
-  }
-
-  try {
-    normalizeReferences(type, envelope.references);
-  } catch (err) {
-    return err.message;
   }
 
   return null;
@@ -192,10 +161,14 @@ export function normalizeEnvelopeForStorage(envelope) {
   return {
     ...envelope,
     type: envelope.type ?? "message",
+    sender: envelope.from,
+    recipient: envelope.to,
+    content_type: envelope.content_type ?? "text",
     name: typeof envelope.name === "string" ? envelope.name : null,
-    subject: typeof envelope.subject === "string" ? envelope.subject : "",
-    body: typeof envelope.body === "string" ? envelope.body : "",
+    subject: typeof envelope.subject === "string" ? envelope.subject : null,
+    body: typeof envelope.body === "string" ? envelope.body : null,
+    in_reply_to:
+      typeof envelope.in_reply_to === "string" ? envelope.in_reply_to : null,
     expires: Number.isInteger(envelope.expires) ? envelope.expires : null,
-    references: envelope.references === undefined ? null : envelope.references,
   };
 }

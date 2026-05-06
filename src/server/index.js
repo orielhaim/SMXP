@@ -3,13 +3,13 @@ import config from "../config.js";
 import { getAllDomains } from "../store/domains.js";
 import { ensureServerKeys } from "../store/server-config.js";
 import {
-  adminCreateAlias,
+  adminCreateAddress,
   adminCreateDomain,
-  adminDeleteAlias,
+  adminDeleteAddress,
   adminDeleteDomain,
-  adminGetAlias,
+  adminGetAddress,
   adminGetDomain,
-  adminListAliases,
+  adminListAddresses,
   adminListDomains,
   adminVerifyDomain,
 } from "./admin.js";
@@ -55,13 +55,15 @@ export function createServerApp() {
     .delete("/.smxp/admin/domains/:domain", ({ request, params }) =>
       adminDeleteDomain(request, params.domain),
     )
-    .get("/.smxp/admin/aliases", ({ request }) => adminListAliases(request))
-    .post("/.smxp/admin/aliases", ({ request }) => adminCreateAlias(request))
-    .get("/.smxp/admin/aliases/:domain/:alias", ({ request, params }) =>
-      adminGetAlias(request, params.domain, params.alias),
+    .get("/.smxp/admin/addresses", ({ request }) => adminListAddresses(request))
+    .post("/.smxp/admin/addresses", ({ request }) =>
+      adminCreateAddress(request),
     )
-    .delete("/.smxp/admin/aliases/:domain/:alias", ({ request, params }) =>
-      adminDeleteAlias(request, params.domain, params.alias),
+    .get("/.smxp/admin/addresses/:domain/:alias", ({ request, params }) =>
+      adminGetAddress(request, params.domain, params.alias),
+    )
+    .delete("/.smxp/admin/addresses/:domain/:alias", ({ request, params }) =>
+      adminDeleteAddress(request, params.domain, params.alias),
     )
     .get("/.smxp/server-key", () => handleServerKeyRequest())
     .get("/.smxp/health", () => ({

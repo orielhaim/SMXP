@@ -1,30 +1,9 @@
 import { getDb } from "./db.js";
 
-function serializeReferences(references) {
-  if (references == null) {
-    return null;
-  }
-
-  return JSON.stringify(references);
-}
-
-function parseReferences(referencesJson) {
-  if (!referencesJson) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(referencesJson);
-  } catch {
-    return referencesJson;
-  }
-}
-
 function mapMessageRow(row) {
   return {
     ...row,
     expires: row.expires_at,
-    references: parseReferences(row.references_json),
   };
 }
 
@@ -32,38 +11,40 @@ export function storeMessage(
   envelope,
   direction,
   verified = 0,
-  deliveredTo = envelope.to,
+  deliveredTo = envelope.recipient,
 ) {
   const db = getDb();
   db.run(
     `INSERT OR IGNORE INTO messages (
       id,
+      conversation_id,
+      in_reply_to,
       direction,
       type,
-      name,
-      "from",
-      "to",
+      sender,
+      recipient,
       delivered_to,
       subject,
       body,
+      content_type,
       expires_at,
-      references_json,
       signature,
       key_id,
       verified
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       envelope.id,
+      envelope.conversation_id,
+      envelope.in_reply_to ?? null,
       direction,
       envelope.type ?? "message",
-      envelope.name ?? null,
-      envelope.from,
-      envelope.to,
+      envelope.sender,
+      envelope.recipient,
       deliveredTo,
-      envelope.subject,
-      envelope.body,
+      envelope.subject ?? null,
+      envelope.body ?? null,
+      envelope.content_type ?? "text",
       envelope.expires ?? null,
-      serializeReferences(envelope.references),
       envelope.signature,
       envelope.key_id,
       verified,
@@ -71,21 +52,21 @@ export function storeMessage(
   );
 }
 
-export function getMessages(direction, alias) {
+export function getMessages(direction, address) {
   const db = getDb();
   if (direction === "in") {
     return db
       .query(
         `SELECT * FROM messages WHERE direction = 'in' AND delivered_to = ? ORDER BY created_at DESC`,
       )
-      .all(alias)
+      .all(address)
       .map(mapMessageRow);
   }
   return db
     .query(
-      `SELECT * FROM messages WHERE direction = 'out' AND "from" = ? ORDER BY created_at DESC`,
+      `SELECT * FROM messages WHERE direction = 'out' AND sender = ? ORDER BY created_at DESC`,
     )
-    .all(alias)
+    .all(address)
     .map(mapMessageRow);
 }
 

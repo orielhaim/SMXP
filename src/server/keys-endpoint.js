@@ -1,14 +1,14 @@
 import { signObject } from "../crypto/sign.js";
-import { getAlias } from "../store/aliases.js";
+import { getAddress } from "../store/addresses.js";
 import { getDb } from "../store/db.js";
 
 export function handleKeysRequest(domainName, aliasName) {
   const domain = domainName.trim().toLowerCase();
   const aliasPart = aliasName.trim().toLowerCase();
-  const alias = getAlias(domain, aliasPart);
+  const address = getAddress(domain, aliasPart);
 
-  if (!alias || alias.mode !== "inbox") {
-    return new Response(JSON.stringify({ error: "inbox alias not found" }), {
+  if (!address || address.mode !== "inbox") {
+    return new Response(JSON.stringify({ error: "inbox address not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
@@ -32,9 +32,9 @@ export function handleKeysRequest(domainName, aliasName) {
   const payload = {
     alias: aliasPart,
     domain,
-    public_key: alias.public_key,
-    key_id: alias.key_id,
-    algorithm: alias.algorithm,
+    public_key: address.public_key,
+    key_id: address.key_id,
+    algorithm: address.algorithm,
   };
 
   const response = {

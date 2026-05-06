@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
 import { verifyPassword } from "../../crypto/password.js";
-import { getAlias } from "../../store/aliases.js";
+import { getAddress } from "../../store/addresses.js";
 import {
   createToken,
   deleteToken,
@@ -23,7 +23,7 @@ export function authRoutes() {
       async ({ body }) => {
         const { alias, domain, password } = body;
 
-        const row = getAlias(domain, alias);
+        const row = getAddress(domain, alias);
         if (!row?.password_hash) {
           return jsonResponse({ error: "invalid credentials" }, 401);
         }

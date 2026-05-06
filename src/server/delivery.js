@@ -3,7 +3,7 @@ import {
   normalizeEnvelopeForStorage,
   validateEnvelope,
 } from "../shared/envelope.js";
-import { resolveDeliveryAlias } from "../store/aliases.js";
+import { resolveDeliveryAddress } from "../store/addresses.js";
 import { domainExists } from "../store/domains.js";
 import { messageExists, storeMessage } from "../store/messages.js";
 
@@ -36,13 +36,13 @@ export async function deliverEnvelope(envelope, verifySender) {
 
   let deliveries;
   try {
-    deliveries = resolveDeliveryAlias(to.address);
+    deliveries = resolveDeliveryAddress(to.address);
   } catch (err) {
     return jsonResponse({ error: err.message }, 400);
   }
 
   if (!deliveries || deliveries.length === 0) {
-    return jsonResponse({ error: "recipient alias not found" }, 404);
+    return jsonResponse({ error: "recipient address not found" }, 404);
   }
 
   if (messageExists(envelope.id)) {
