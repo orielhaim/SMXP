@@ -87,19 +87,19 @@ function getAdminKeyFromRequest(request) {
 }
 
 function isAuthorized(request) {
-  if (!config.adminApiKey) {
+  if (!config.adminSecret) {
     return false;
   }
 
   const provided = Buffer.from(getAdminKeyFromRequest(request));
-  const expected = Buffer.from(config.adminApiKey);
+  const expected = Buffer.from(config.adminSecret);
   return (
     provided.length === expected.length && timingSafeEqual(provided, expected)
   );
 }
 
 export function requireAdmin(request) {
-  if (!config.adminApiKey) {
+  if (!config.adminSecret) {
     return jsonResponse({ error: "admin API key is not configured" }, 503);
   }
 
@@ -122,7 +122,7 @@ function domainResponse(domain) {
   return {
     domain,
     dns: {
-      key: getServerDnsRecord(config.dbPath, domain),
+      key: getServerDnsRecord(domain),
       service: serviceDnsRecord(domain),
     },
   };
@@ -133,10 +133,10 @@ export async function adminListDomains(request) {
   if (auth) return auth;
 
   return jsonResponse({
-    domains: getAllDomains(config.dbPath).map((domain) => ({
+    domains: getAllDomains().map((domain) => ({
       ...domain,
       dns: {
-        key: getServerDnsRecord(config.dbPath, domain.domain),
+        key: getServerDnsRecord(domain.domain),
         service: serviceDnsRecord(domain.domain),
       },
     })),
@@ -150,7 +150,7 @@ export async function adminCreateDomain(request) {
   try {
     const body = await parseJsonBody(request);
     const domain = normalizeDomain(body.domain);
-    createDomain(config.dbPath, domain);
+    createDomain(domain);
     return jsonResponse(domainResponse(domain), 201);
   } catch (err) {
     return jsonResponse({ error: err.message }, 400);
@@ -163,9 +163,7 @@ export async function adminGetDomain(request, domainName) {
 
   try {
     const domain = normalizeDomain(domainName);
-    const existing = getAllDomains(config.dbPath).find(
-      (row) => row.domain === domain,
-    );
+    const existing = getAllDomains().find((row) => row.domain === domain);
     if (!existing) {
       return jsonResponse({ error: "domain not found" }, 404);
     }
@@ -182,11 +180,11 @@ export async function adminVerifyDomain(request, domainName) {
 
   try {
     const domain = normalizeDomain(domainName);
-    if (!domainExists(config.dbPath, domain)) {
+    if (!domainExists(domain)) {
       return jsonResponse({ error: "domain not found" }, 404);
     }
 
-    const expected = getServerDnsRecord(config.dbPath, domain);
+    const expected = getServerDnsRecord(domain);
     const actualFingerprint = await fetchDnsFingerprint(domain);
     const verified = actualFingerprint === expected.fingerprint;
     let service = null;
@@ -218,7 +216,7 @@ export async function adminDeleteDomain(request, domainName) {
 
   try {
     const domain = normalizeDomain(domainName);
-    if (!deleteDomain(config.dbPath, domain)) {
+    if (!deleteDomain(domain)) {
       return jsonResponse({ error: "domain not found" }, 404);
     }
 
@@ -236,8 +234,8 @@ export async function adminListAliases(request) {
     const url = new URL(request.url);
     const domain = url.searchParams.get("domain");
     const aliases = domain
-      ? getAliasesForDomain(config.dbPath, normalizeDomain(domain))
-      : getAllAliases(config.dbPath);
+      ? getAliasesForDomain(normalizeDomain(domain))
+      : getAllAliases();
 
     return jsonResponse({ aliases });
   } catch (err) {
@@ -261,11 +259,11 @@ export async function adminCreateAlias(request) {
 
     const passwordHash = hashPassword(body.password);
 
-    if (!domainExists(config.dbPath, domain)) {
+    if (!domainExists(domain)) {
       return jsonResponse({ error: "domain does not exist" }, 404);
     }
 
-    if (getAlias(config.dbPath, domain, alias)) {
+    if (getAlias(domain, alias)) {
       return jsonResponse({ error: "alias already exists" }, 409);
     }
 
@@ -280,7 +278,6 @@ export async function adminCreateAlias(request) {
       const keys = generateKeyPair();
       const publicKey = serializePublicKey(keys.publicKey);
       createInboxAlias(
-        config.dbPath,
         domain,
         alias,
         passwordHash,
@@ -319,11 +316,7 @@ export async function adminCreateAlias(request) {
       );
     }
 
-    const targetAlias = getAlias(
-      config.dbPath,
-      target.domain,
-      target.localPart,
-    );
+    const targetAlias = getAlias(target.domain, target.localPart);
     if (!targetAlias || targetAlias.mode !== "inbox") {
       return jsonResponse(
         { error: "forward target must be an inbox alias" },
@@ -331,13 +324,7 @@ export async function adminCreateAlias(request) {
       );
     }
 
-    createForwardAlias(
-      config.dbPath,
-      domain,
-      alias,
-      passwordHash,
-      target.address,
-    );
+    createForwardAlias(domain, alias, passwordHash, target.address);
 
     return jsonResponse(
       {
@@ -361,7 +348,7 @@ export async function adminGetAlias(request, domainName, aliasName) {
   try {
     const domain = normalizeDomain(domainName);
     const alias = normalizeAlias(aliasName);
-    const row = getAlias(config.dbPath, domain, alias);
+    const row = getAlias(domain, alias);
     if (!row) {
       return jsonResponse({ error: "alias not found" }, 404);
     }
@@ -382,7 +369,7 @@ export async function adminDeleteAlias(request, domainName, aliasName) {
   try {
     const domain = normalizeDomain(domainName);
     const alias = normalizeAlias(aliasName);
-    if (!deleteAlias(config.dbPath, domain, alias)) {
+    if (!deleteAlias(domain, alias)) {
       return jsonResponse({ error: "alias not found" }, 404);
     }
 

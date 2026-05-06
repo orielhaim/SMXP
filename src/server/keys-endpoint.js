@@ -1,4 +1,3 @@
-import config from "../config.js";
 import { signObject } from "../crypto/sign.js";
 import { getAlias } from "../store/aliases.js";
 import { getDb } from "../store/db.js";
@@ -6,7 +5,7 @@ import { getDb } from "../store/db.js";
 export function handleKeysRequest(domainName, aliasName) {
   const domain = domainName.trim().toLowerCase();
   const aliasPart = aliasName.trim().toLowerCase();
-  const alias = getAlias(config.dbPath, domain, aliasPart);
+  const alias = getAlias(domain, aliasPart);
 
   if (!alias || alias.mode !== "inbox") {
     return new Response(JSON.stringify({ error: "inbox alias not found" }), {
@@ -15,7 +14,7 @@ export function handleKeysRequest(domainName, aliasName) {
     });
   }
 
-  const db = getDb(config.dbPath);
+  const db = getDb();
   const serverKey = db
     .query(`SELECT value FROM server_config WHERE key = ?`)
     .get("server_secret_key");

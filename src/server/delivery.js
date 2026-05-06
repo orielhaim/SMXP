@@ -14,7 +14,7 @@ function jsonResponse(body, status) {
   });
 }
 
-export async function deliverEnvelope(dbPath, envelope, verifySender) {
+export async function deliverEnvelope(envelope, verifySender) {
   const receivedAt = Math.floor(Date.now() / 1000);
   const validationError = validateEnvelope(envelope);
   if (validationError) {
@@ -30,13 +30,13 @@ export async function deliverEnvelope(dbPath, envelope, verifySender) {
     return jsonResponse({ error: err.message }, 400);
   }
 
-  if (!domainExists(dbPath, to.domain)) {
+  if (!domainExists(to.domain)) {
     return jsonResponse({ error: "recipient domain not on this server" }, 404);
   }
 
   let delivery;
   try {
-    delivery = resolveDeliveryAlias(dbPath, to.address);
+    delivery = resolveDeliveryAlias(to.address);
   } catch (err) {
     return jsonResponse({ error: err.message }, 400);
   }
@@ -45,7 +45,7 @@ export async function deliverEnvelope(dbPath, envelope, verifySender) {
     return jsonResponse({ error: "recipient alias not found" }, 404);
   }
 
-  if (messageExists(dbPath, envelope.id)) {
+  if (messageExists(envelope.id)) {
     return jsonResponse({ error: "duplicate message" }, 409);
   }
 
@@ -56,7 +56,6 @@ export async function deliverEnvelope(dbPath, envelope, verifySender) {
   try {
     await verifySender(envelope, from);
     storeMessage(
-      dbPath,
       normalizeEnvelopeForStorage(envelope),
       "in",
       1,

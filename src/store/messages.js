@@ -29,13 +29,12 @@ function mapMessageRow(row) {
 }
 
 export function storeMessage(
-  dbPath,
   envelope,
   direction,
   verified = 0,
   deliveredTo = envelope.to,
 ) {
-  const db = getDb(dbPath);
+  const db = getDb();
   db.run(
     `INSERT OR IGNORE INTO messages (
       id,
@@ -72,8 +71,8 @@ export function storeMessage(
   );
 }
 
-export function getMessages(dbPath, direction, alias) {
-  const db = getDb(dbPath);
+export function getMessages(direction, alias) {
+  const db = getDb();
   if (direction === "in") {
     return db
       .query(
@@ -90,8 +89,8 @@ export function getMessages(dbPath, direction, alias) {
     .map(mapMessageRow);
 }
 
-export function messageExists(dbPath, id, direction = "in") {
-  const db = getDb(dbPath);
+export function messageExists(id, direction = "in") {
+  const db = getDb();
   const row = db
     .query(`SELECT id FROM messages WHERE id = ? AND direction = ?`)
     .get(id, direction);

@@ -1,7 +1,7 @@
 import { getDb } from "./db.js";
 
-export function initSchema(dbPath) {
-  const db = getDb(dbPath);
+export function initSchema() {
+  const db = getDb();
 
   db.run(`
     CREATE TABLE IF NOT EXISTS server_config (

@@ -1,4 +1,3 @@
-import config from "../config.js";
 import { deliverEnvelope } from "./delivery.js";
 import { verifyRemoteSender } from "./verification.js";
 
@@ -13,7 +12,7 @@ export async function handleReceive(req) {
     });
   }
 
-  return await deliverEnvelope(config.dbPath, envelope, (message, sender) =>
+  return await deliverEnvelope(envelope, (message, sender) =>
     verifyRemoteSender(message, sender.domain, sender.localPart),
   );
 }

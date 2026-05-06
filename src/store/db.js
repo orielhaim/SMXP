@@ -2,11 +2,14 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
+import config from "../config.js";
+
 let db = null;
 
-export function getDb(dbPath) {
+export function getDb() {
   if (db) return db;
 
+  const dbPath = config.dbPath;
   const dir = dirname(dbPath);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });

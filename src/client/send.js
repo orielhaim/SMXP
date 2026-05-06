@@ -1,4 +1,3 @@
-import config from "../config.js";
 import { discoverSmxp } from "../dns/discover.js";
 import { deliverEnvelope } from "../server/delivery.js";
 import { verifyLocalSender } from "../server/verification.js";
@@ -24,7 +23,7 @@ export async function sendMessage({
 }) {
   const sender = parseAddress(from);
   const recipient = parseAddress(to);
-  const alias = getInboxAliasByAddress(config.dbPath, sender.address);
+  const alias = getInboxAliasByAddress(sender.address);
 
   if (!alias) {
     throw new Error(`Inbox alias "${sender.address}" not found in local store`);
@@ -43,10 +42,10 @@ export async function sendMessage({
     keyId: alias.key_id,
   });
 
-  if (domainExists(config.dbPath, recipient.domain)) {
+  if (domainExists(recipient.domain)) {
     console.log(`[SEND] Local delivery to ${recipient.address}`);
-    const response = await deliverEnvelope(config.dbPath, envelope, (message) =>
-      verifyLocalSender(config.dbPath, message, alias),
+    const response = await deliverEnvelope(envelope, (message) =>
+      verifyLocalSender(message, alias),
     );
 
     if (!response.ok) {
@@ -56,7 +55,6 @@ export async function sendMessage({
 
     const result = await response.json();
     storeMessage(
-      config.dbPath,
       normalizeEnvelopeForStorage(envelope),
       "out",
       1,
@@ -90,13 +88,7 @@ export async function sendMessage({
 
   const result = await res.json();
 
-  storeMessage(
-    config.dbPath,
-    normalizeEnvelopeForStorage(envelope),
-    "out",
-    1,
-    sender.address,
-  );
+  storeMessage(normalizeEnvelopeForStorage(envelope), "out", 1, sender.address);
 
   console.log(`[SEND] Message ${envelope.id} delivered successfully`);
   return { envelope, result };

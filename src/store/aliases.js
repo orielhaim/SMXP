@@ -3,7 +3,6 @@ import { getDb } from "./db.js";
 import { createDomain } from "./domains.js";
 
 export function createInboxAlias(
-  dbPath,
   domain,
   alias,
   passwordHash,
@@ -12,7 +11,7 @@ export function createInboxAlias(
   keyId,
   algorithm = "ML-DSA-65",
 ) {
-  const db = getDb(dbPath);
+  const db = getDb();
   const normalizedDomain = domain.trim().toLowerCase();
   const normalizedAlias = alias.trim().toLowerCase();
 
@@ -23,7 +22,7 @@ export function createInboxAlias(
     throw new Error("alias password hash is required");
   }
 
-  createDomain(dbPath, normalizedDomain);
+  createDomain(normalizedDomain);
   db.run(
     `INSERT OR REPLACE INTO aliases (
       domain,
@@ -48,8 +47,8 @@ export function createInboxAlias(
   );
 }
 
-export function createForwardAlias(dbPath, domain, alias, forwardTo) {
-  const db = getDb(dbPath);
+export function createForwardAlias(domain, alias, forwardTo) {
+  const db = getDb();
   const normalizedDomain = domain.trim().toLowerCase();
   const normalizedAlias = alias.trim().toLowerCase();
   const target = parseAddress(forwardTo);
@@ -58,8 +57,8 @@ export function createForwardAlias(dbPath, domain, alias, forwardTo) {
     throw new Error("forward targets must belong to the same domain");
   }
 
-  createDomain(dbPath, normalizedDomain);
-  const targetAlias = getAlias(dbPath, target.domain, target.localPart);
+  createDomain(normalizedDomain);
+  const targetAlias = getAlias(target.domain, target.localPart);
   if (!targetAlias || targetAlias.mode !== "inbox") {
     throw new Error(
       `forward target "${target.address}" must be an inbox alias`,
@@ -81,15 +80,15 @@ export function createForwardAlias(dbPath, domain, alias, forwardTo) {
   );
 }
 
-export function getAlias(dbPath, domain, alias) {
-  const db = getDb(dbPath);
+export function getAlias(domain, alias) {
+  const db = getDb();
   return db
     .query(`SELECT * FROM aliases WHERE domain = ? AND alias = ?`)
     .get(domain.trim().toLowerCase(), alias.trim().toLowerCase());
 }
 
-export function getAllAliases(dbPath) {
-  const db = getDb(dbPath);
+export function getAllAliases() {
+  const db = getDb();
   return db
     .query(
       `SELECT domain, alias, mode, forward_to, public_key, key_id, algorithm, created_at
@@ -99,8 +98,8 @@ export function getAllAliases(dbPath) {
     .all();
 }
 
-export function getAliasesForDomain(dbPath, domain) {
-  const db = getDb(dbPath);
+export function getAliasesForDomain(domain) {
+  const db = getDb();
   return db
     .query(
       `SELECT domain, alias, mode, forward_to, public_key, key_id, algorithm, created_at
@@ -111,17 +110,17 @@ export function getAliasesForDomain(dbPath, domain) {
     .all(domain.trim().toLowerCase());
 }
 
-export function deleteAlias(dbPath, domain, alias) {
-  const db = getDb(dbPath);
+export function deleteAlias(domain, alias) {
+  const db = getDb();
   const result = db
     .query(`DELETE FROM aliases WHERE domain = ? AND alias = ? RETURNING alias`)
     .get(domain.trim().toLowerCase(), alias.trim().toLowerCase());
   return !!result;
 }
 
-export function getInboxAliasByAddress(dbPath, address) {
+export function getInboxAliasByAddress(address) {
   const { domain, localPart } = parseAddress(address);
-  const alias = getAlias(dbPath, domain, localPart);
+  const alias = getAlias(domain, localPart);
 
   if (!alias || alias.mode !== "inbox") {
     return null;
@@ -130,7 +129,7 @@ export function getInboxAliasByAddress(dbPath, address) {
   return alias;
 }
 
-export function resolveDeliveryAlias(dbPath, address) {
+export function resolveDeliveryAlias(address) {
   const parsed = parseAddress(address);
   let currentLocalPart = parsed.localPart;
   const visited = new Set();
@@ -142,9 +141,9 @@ export function resolveDeliveryAlias(dbPath, address) {
     }
     visited.add(currentAddress);
 
-    const exactAlias = getAlias(dbPath, parsed.domain, currentLocalPart);
+    const exactAlias = getAlias(parsed.domain, currentLocalPart);
     const alias =
-      exactAlias ?? (depth === 0 ? getAlias(dbPath, parsed.domain, "*") : null);
+      exactAlias ?? (depth === 0 ? getAlias(parsed.domain, "*") : null);
 
     if (!alias) {
       return null;

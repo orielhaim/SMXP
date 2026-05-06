@@ -1,9 +1,8 @@
 import { sendMessage } from "./client/send.js";
-import config from "./config.js";
 import { startServer } from "./server/index.js";
 import { initSchema } from "./store/schema.js";
 
-initSchema(config.dbPath);
+initSchema();
 
 startServer();
 

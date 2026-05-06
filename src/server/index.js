@@ -17,7 +17,7 @@ import { handleKeysRequest } from "./keys-endpoint.js";
 import { handleReceive } from "./receive.js";
 
 export function handleServerKeyRequest() {
-  const serverKeys = ensureServerKeys(config.dbPath);
+  const serverKeys = ensureServerKeys();
 
   return new Response(
     JSON.stringify({
@@ -60,7 +60,7 @@ export function createServerApp() {
     .get("/.smxp/server-key", () => handleServerKeyRequest())
     .get("/.smxp/health", () => ({
       status: "ok",
-      domains: getAllDomains(config.dbPath).map((domain) => domain.domain),
+      domains: getAllDomains().map((domain) => domain.domain),
       port: config.port,
     }));
 }
@@ -71,9 +71,9 @@ export function startServer() {
     port: config.port,
   });
 
-  const domains = getAllDomains(config.dbPath).map((domain) => domain.domain);
+  const domains = getAllDomains().map((domain) => domain.domain);
   console.log(
-    `[SMXP] Server listening on ${config.host}:${config.port} for domains ${domains.join(", ") || "(none)"}`,
+    `[SMXP] Server listening on localhost:${config.port} for domains ${domains.join(", ") || "(none)"}`,
   );
   return app;
 }

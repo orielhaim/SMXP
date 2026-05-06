@@ -6,8 +6,8 @@ import {
 } from "../crypto/keys.js";
 import { getDb } from "./db.js";
 
-export function ensureServerKeys(dbPath) {
-  const db = getDb(dbPath);
+export function ensureServerKeys() {
+  const db = getDb();
   const publicKey = db
     .query(`SELECT value FROM server_config WHERE key = ?`)
     .get("server_public_key");
@@ -59,8 +59,8 @@ export function ensureServerKeys(dbPath) {
   };
 }
 
-export function getServerDnsRecord(dbPath, domain) {
-  const serverKeys = ensureServerKeys(dbPath);
+export function getServerDnsRecord(domain) {
+  const serverKeys = ensureServerKeys();
   const fingerprint = fingerprintPublicKey(serverKeys.public_key);
 
   return {

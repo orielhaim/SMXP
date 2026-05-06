@@ -9,6 +9,7 @@ import { createForwardAlias, createInboxAlias } from "../src/store/aliases.js";
 import { getDb } from "../src/store/db.js";
 import { createDomain } from "../src/store/domains.js";
 import { initSchema } from "../src/store/schema.js";
+import config from "../src/config.js";
 
 console.log("=== SMXP Key Generator ===\n");
 
@@ -18,14 +19,16 @@ const domain = (prompt("Domain name (default: localhost):") || "localhost")
 const dbPath =
   prompt("Database path (default: ./data/smxp.db):") || "./data/smxp.db";
 
+config.dbPath = dbPath;
+
 const modeInput = prompt(
   "What to generate?\n  1) Server keys + domain\n  2) Inbox alias\n  3) Forward alias\nChoose (1/2/3):",
 );
 
-console.log(`\n[KEYGEN] Initializing database at ${dbPath}...`);
-initSchema(dbPath);
-createDomain(dbPath, domain);
-const db = getDb(dbPath);
+console.log(`\n[KEYGEN] Initializing database at ${config.dbPath}...`);
+initSchema();
+createDomain(domain);
+const db = getDb();
 
 const existingServerKey = db
   .query(`SELECT value FROM server_config WHERE key = 'server_public_key'`)
@@ -75,7 +78,6 @@ if (modeInput === "2") {
   const aliasKeys = generateKeyPair();
   const password = prompt("Alias password:") || "";
   createInboxAlias(
-    dbPath,
     domain,
     aliasName,
     await hashPassword(password),
@@ -104,7 +106,7 @@ if (modeInput === "3") {
     process.exit(1);
   }
 
-  createForwardAlias(dbPath, domain, aliasName, forwardTo);
+  createForwardAlias(domain, aliasName, forwardTo);
   console.log(
     `[KEYGEN] Forward alias "${aliasName}@${domain}" -> ${forwardTo} created.`,
   );

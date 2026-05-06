@@ -103,8 +103,8 @@ export async function verifyRemoteSender(envelope, senderDomain, senderAlias) {
   }
 }
 
-export async function verifyLocalSender(dbPath, envelope, senderAlias) {
-  const db = getDb(dbPath);
+export async function verifyLocalSender(envelope, senderAlias) {
+  const db = getDb();
   const publicKey = db
     .query(`SELECT value FROM server_config WHERE key = ?`)
     .get("server_public_key");
