@@ -119,4 +119,4 @@ If you're tired of email being stuck in 1985 and want to help build what comes n
 
 ## License
 
-[Apache 2.0](LICENSE). Do whatever you want with it.
+[Apache 2.0](LICENSE) Do whatever you want with it.
