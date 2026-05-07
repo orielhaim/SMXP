@@ -3,7 +3,7 @@ import { toBase64Url } from "../shared/encoding.js";
 import { getDb } from "./db.js";
 
 export function generateDelegationId() {
-  return "dlg_" + toBase64Url(randomBytes(8));
+  return `dlg_${toBase64Url(randomBytes(8))}`;
 }
 
 export function createDelegation({
