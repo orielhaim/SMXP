@@ -11,6 +11,7 @@ import { getInboxAddressByAddress } from "../store/addresses.js";
 import { domainExists } from "../store/domains.js";
 import { storeMessage } from "../store/messages.js";
 import { buildBaseUrl, resolveTarget } from "./resolve.js";
+import { smxpFetch } from "../shared/fetch.js";
 
 export async function sendMessage({
   from,
@@ -86,18 +87,7 @@ export async function sendMessage({
   const url = `${baseUrl}/.smxp/receive`;
   console.log(`[SEND] Delivering to ${url}`);
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(envelope),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`Delivery failed: ${res.status} ${errBody}`);
-  }
-
-  const result = await res.json();
+  const result = await smxpFetch.post(url, { json: envelope }).json();
 
   const msgForStorage = normalizeEnvelopeForStorage(envelope);
   storeMessage(msgForStorage, "out", 1, sender.address);

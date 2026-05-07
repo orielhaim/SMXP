@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { Elysia, t } from "elysia";
 import config from "../config.js";
 import {
   generateKeyPair,
@@ -25,89 +26,43 @@ import {
 import { getServerDnsRecord } from "../store/server-config.js";
 import { fetchDnsFingerprint } from "./verification.js";
 
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
 function normalizeDomain(domain) {
-  if (typeof domain !== "string") {
-    throw new Error("domain is required");
-  }
-
-  const normalized = domain.trim().toLowerCase();
+  const v = domain.trim().toLowerCase();
   if (
-    !normalized ||
-    normalized.includes("@") ||
-    normalized.startsWith(".") ||
-    normalized.endsWith(".") ||
-    !/^[a-z0-9.-]+$/.test(normalized)
-  ) {
+    !v ||
+    v.includes("@") ||
+    v.startsWith(".") ||
+    v.endsWith(".") ||
+    !/^[a-z0-9.-]+$/.test(v)
+  )
     throw new Error(`invalid domain "${domain}"`);
-  }
-
-  return normalized;
+  return v;
 }
 
 function normalizeAlias(alias) {
-  if (typeof alias !== "string") {
-    throw new Error("alias is required");
-  }
-
-  const normalized = alias.trim().toLowerCase();
+  const v = alias.trim().toLowerCase();
   if (
-    !normalized ||
-    normalized.includes("@") ||
-    normalized.includes("/") ||
-    (normalized !== "*" && !/^[a-z0-9._+-]+$/.test(normalized))
-  ) {
+    !v ||
+    v.includes("@") ||
+    v.includes("/") ||
+    (v !== "*" && !/^[a-z0-9._+-]+$/.test(v))
+  )
     throw new Error(`invalid alias "${alias}"`);
-  }
-
-  return normalized;
+  return v;
 }
 
-async function parseJsonBody(request) {
-  try {
-    return await request.json();
-  } catch {
-    throw new Error("invalid JSON");
-  }
-}
-
-function getAdminKeyFromRequest(request) {
-  const bearer = request.headers.get("authorization") || "";
-  if (bearer.toLowerCase().startsWith("bearer ")) {
-    return bearer.slice(7).trim();
-  }
-
-  return request.headers.get("x-admin-api-key") || "";
-}
-
-function isAuthorized(request) {
-  if (!config.adminSecret) {
-    return false;
-  }
-
-  const provided = Buffer.from(getAdminKeyFromRequest(request));
+function isAuthorized(headers) {
+  if (!config.adminSecret) return false;
+  const auth = headers.authorization ?? headers.authorization ?? "";
+  const key = auth.toLowerCase().startsWith("bearer ")
+    ? auth.slice(7).trim()
+    : (headers["x-admin-api-key"] ?? "");
+  if (!key) return false;
+  const provided = Buffer.from(key);
   const expected = Buffer.from(config.adminSecret);
   return (
     provided.length === expected.length && timingSafeEqual(provided, expected)
   );
-}
-
-export function requireAdmin(request) {
-  if (!config.adminSecret) {
-    return jsonResponse({ error: "admin API key is not configured" }, 503);
-  }
-
-  if (!isAuthorized(request)) {
-    return jsonResponse({ error: "unauthorized" }, 401);
-  }
-
-  return null;
 }
 
 function serviceDnsRecord(domain) {
@@ -118,7 +73,7 @@ function serviceDnsRecord(domain) {
   };
 }
 
-function domainResponse(domain) {
+function domainPayload(domain) {
   return {
     domain,
     dns: {
@@ -128,282 +83,316 @@ function domainResponse(domain) {
   };
 }
 
-export async function adminListDomains(request) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
+export function adminRoutes() {
+  return new Elysia({ prefix: "/.smxp/admin" })
 
-  return jsonResponse({
-    domains: getAllDomains().map((domain) => ({
-      ...domain,
-      dns: {
-        key: getServerDnsRecord(domain.domain),
-        service: serviceDnsRecord(domain.domain),
-      },
-    })),
-  });
-}
-
-export async function adminCreateDomain(request) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
-
-  try {
-    const body = await parseJsonBody(request);
-    const domain = normalizeDomain(body.domain);
-    createDomain(domain);
-    return jsonResponse(domainResponse(domain), 201);
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 400);
-  }
-}
-
-export async function adminGetDomain(request, domainName) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
-
-  try {
-    const domain = normalizeDomain(domainName);
-    const existing = getAllDomains().find((row) => row.domain === domain);
-    if (!existing) {
-      return jsonResponse({ error: "domain not found" }, 404);
-    }
-
-    return jsonResponse({ ...existing, ...domainResponse(domain) });
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 400);
-  }
-}
-
-export async function adminVerifyDomain(request, domainName) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
-
-  try {
-    const domain = normalizeDomain(domainName);
-    if (!domainExists(domain)) {
-      return jsonResponse({ error: "domain not found" }, 404);
-    }
-
-    const expected = getServerDnsRecord(domain);
-    const actualFingerprint = await fetchDnsFingerprint(domain);
-    const verified = actualFingerprint === expected.fingerprint;
-    let service = null;
-
-    try {
-      service = await discoverSmxp(domain);
-    } catch (err) {
-      service = { error: err.message };
-    }
-
-    return jsonResponse(
-      {
-        domain,
-        verified,
-        expected_fingerprint: expected.fingerprint,
-        actual_fingerprint: actualFingerprint,
-        service,
-      },
-      verified ? 200 : 409,
-    );
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 400);
-  }
-}
-
-export async function adminDeleteDomain(request, domainName) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
-
-  try {
-    const domain = normalizeDomain(domainName);
-    if (!deleteDomain(domain)) {
-      return jsonResponse({ error: "domain not found" }, 404);
-    }
-
-    return jsonResponse({ status: "deleted", domain });
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 400);
-  }
-}
-
-export async function adminListAddresses(request) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
-
-  try {
-    const url = new URL(request.url);
-    const domain = url.searchParams.get("domain");
-    const addresses = domain
-      ? getAddressesForDomain(normalizeDomain(domain))
-      : getAllAddresses();
-
-    return jsonResponse({ addresses });
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 400);
-  }
-}
-
-export async function adminCreateAddress(request) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
-
-  try {
-    const body = await parseJsonBody(request);
-    const domain = normalizeDomain(body.domain);
-    const alias = normalizeAlias(body.alias);
-    const mode = body.mode || "inbox";
-
-    if (!["inbox", "forward"].includes(mode)) {
-      return jsonResponse({ error: "mode must be inbox or forward" }, 400);
-    }
-
-    const passwordHash = hashPassword(body.password);
-
-    if (!domainExists(domain)) {
-      return jsonResponse({ error: "domain does not exist" }, 404);
-    }
-
-    if (getAddress(domain, alias)) {
-      return jsonResponse({ error: "address already exists" }, 409);
-    }
-
-    if (mode === "inbox") {
-      if (alias === "*") {
-        return jsonResponse(
-          { error: "wildcard addresses can only be forwards" },
-          400,
-        );
+    .onBeforeHandle(({ headers, set }) => {
+      if (!config.adminSecret) {
+        set.status = 503;
+        return { error: "admin API key is not configured" };
       }
+      if (!isAuthorized(headers)) {
+        set.status = 401;
+        return { error: "unauthorized" };
+      }
+    })
 
-      const keys = generateKeyPair();
-      const publicKey = serializePublicKey(keys.publicKey);
-      createInboxAddress(
-        domain,
-        alias,
-        passwordHash,
-        publicKey,
-        serializeSecretKey(keys.secretKey),
-        keys.keyId,
-        keys.algorithm,
-      );
+    .get(
+      "/domains",
+      () => ({
+        domains: getAllDomains().map((d) => ({
+          ...d,
+          ...domainPayload(d.domain),
+        })),
+      }),
+      { detail: { tags: ["Admin"], summary: "List all domains" } },
+    )
 
-      return jsonResponse(
-        {
-          address: `${alias}@${domain}`,
-          domain,
-          alias,
-          mode,
-          public_key: publicKey,
-          key_id: keys.keyId,
-          algorithm: keys.algorithm,
+    .post(
+      "/domains",
+      ({ body, set }) => {
+        try {
+          const domain = normalizeDomain(body.domain);
+          createDomain(domain);
+          set.status = 201;
+          return domainPayload(domain);
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        body: t.Object({ domain: t.String({ minLength: 1 }) }),
+        detail: { tags: ["Admin"], summary: "Add a domain" },
+      },
+    )
+
+    .get(
+      "/domains/:domain",
+      ({ params, set }) => {
+        try {
+          const domain = normalizeDomain(params.domain);
+          const existing = getAllDomains().find((r) => r.domain === domain);
+          if (!existing) {
+            set.status = 404;
+            return { error: "domain not found" };
+          }
+          return { ...existing, ...domainPayload(domain) };
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        params: t.Object({ domain: t.String() }),
+        detail: { tags: ["Admin"], summary: "Get a domain by name" },
+      },
+    )
+
+    .post(
+      "/domains/:domain/verify",
+      async ({ params, set }) => {
+        try {
+          const domain = normalizeDomain(params.domain);
+          if (!domainExists(domain)) {
+            set.status = 404;
+            return { error: "domain not found" };
+          }
+
+          const expected = getServerDnsRecord(domain);
+          const actual = await fetchDnsFingerprint(domain).catch(() => null);
+          const verified = actual === expected.fingerprint;
+          const service = await discoverSmxp(domain).catch((err) => ({
+            error: err.message,
+          }));
+
+          set.status = verified ? 200 : 409;
+          return {
+            domain,
+            verified,
+            expected_fingerprint: expected.fingerprint,
+            actual_fingerprint: actual,
+            service,
+          };
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        params: t.Object({ domain: t.String() }),
+        detail: { tags: ["Admin"], summary: "Verify a domain's DNS records" },
+      },
+    )
+
+    .delete(
+      "/domains/:domain",
+      ({ params, set }) => {
+        try {
+          const domain = normalizeDomain(params.domain);
+          if (!deleteDomain(domain)) {
+            set.status = 404;
+            return { error: "domain not found" };
+          }
+          return { status: "deleted", domain };
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        params: t.Object({ domain: t.String() }),
+        detail: {
+          tags: ["Admin"],
+          summary: "Delete a domain and all its addresses",
         },
-        201,
-      );
-    }
-
-    if (!body.forward_to) {
-      return jsonResponse(
-        { error: "forward_to is required for forward addresses" },
-        400,
-      );
-    }
-
-    const forwardList = Array.isArray(body.forward_to)
-      ? body.forward_to
-      : [body.forward_to];
-
-    if (forwardList.length === 0) {
-      return jsonResponse(
-        { error: "at least one forward target is required" },
-        400,
-      );
-    }
-
-    const normalizedTargets = [];
-    for (const addr of forwardList) {
-      let target;
-      try {
-        target = parseAddress(addr);
-      } catch {
-        return jsonResponse(
-          { error: `invalid forward target address "${addr}"` },
-          400,
-        );
-      }
-
-      if (target.domain !== domain) {
-        return jsonResponse(
-          {
-            error: `forward target "${target.address}" must belong to the same domain`,
-          },
-          400,
-        );
-      }
-
-      const targetAddress = getAddress(target.domain, target.localPart);
-      if (!targetAddress || targetAddress.mode !== "inbox") {
-        return jsonResponse(
-          {
-            error: `forward target "${target.address}" must be an inbox address`,
-          },
-          targetAddress ? 400 : 404,
-        );
-      }
-
-      normalizedTargets.push(target.address);
-    }
-
-    createForwardAddress(domain, alias, normalizedTargets);
-
-    return jsonResponse(
-      {
-        address: `${alias}@${domain}`,
-        domain,
-        alias,
-        mode,
-        forward_to: normalizedTargets,
       },
-      201,
+    )
+
+    .get(
+      "/addresses",
+      ({ query, set }) => {
+        try {
+          const addresses = query.domain
+            ? getAddressesForDomain(normalizeDomain(query.domain))
+            : getAllAddresses();
+          return { addresses };
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        query: t.Object({ domain: t.Optional(t.String()) }),
+        detail: {
+          tags: ["Admin"],
+          summary: "List addresses, optionally filtered by domain",
+        },
+      },
+    )
+
+    .post(
+      "/addresses",
+      async ({ body, set }) => {
+        try {
+          const domain = normalizeDomain(body.domain);
+          const alias = normalizeAlias(body.alias);
+          const mode = body.mode ?? "inbox";
+
+          if (!domainExists(domain)) {
+            set.status = 404;
+            return { error: "domain does not exist" };
+          }
+          if (getAddress(domain, alias)) {
+            set.status = 409;
+            return { error: "address already exists" };
+          }
+
+          if (mode === "inbox") {
+            if (alias === "*") {
+              set.status = 400;
+              return { error: "wildcard addresses can only be forwards" };
+            }
+            const keys = generateKeyPair();
+            const publicKey = serializePublicKey(keys.publicKey);
+            createInboxAddress(
+              domain,
+              alias,
+              await hashPassword(body.password ?? ""),
+              publicKey,
+              serializeSecretKey(keys.secretKey),
+              keys.keyId,
+              keys.algorithm,
+            );
+            set.status = 201;
+            return {
+              address: `${alias}@${domain}`,
+              domain,
+              alias,
+              mode,
+              public_key: publicKey,
+              key_id: keys.keyId,
+              algorithm: keys.algorithm,
+            };
+          }
+
+          // forward
+          if (!body.forward_to) {
+            set.status = 400;
+            return { error: "forward_to is required for forward addresses" };
+          }
+          const targets = Array.isArray(body.forward_to)
+            ? body.forward_to
+            : [body.forward_to];
+          if (targets.length === 0) {
+            set.status = 400;
+            return { error: "at least one forward target is required" };
+          }
+
+          const normalized = [];
+          for (const addr of targets) {
+            let parsed;
+            try {
+              parsed = parseAddress(addr);
+            } catch {
+              set.status = 400;
+              return { error: `invalid forward target "${addr}"` };
+            }
+            if (parsed.domain !== domain) {
+              set.status = 400;
+              return {
+                error: `forward target "${parsed.address}" must belong to the same domain`,
+              };
+            }
+            const target = getAddress(parsed.domain, parsed.localPart);
+            if (!target || target.mode !== "inbox") {
+              set.status = target ? 400 : 404;
+              return {
+                error: `forward target "${parsed.address}" must be an inbox address`,
+              };
+            }
+            normalized.push(parsed.address);
+          }
+
+          createForwardAddress(domain, alias, normalized);
+          set.status = 201;
+          return {
+            address: `${alias}@${domain}`,
+            domain,
+            alias,
+            mode,
+            forward_to: normalized,
+          };
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        body: t.Object({
+          domain: t.String({ minLength: 1 }),
+          alias: t.String({ minLength: 1 }),
+          mode: t.Optional(t.Union([t.Literal("inbox"), t.Literal("forward")])),
+          password: t.Optional(
+            t.String({ description: "Required for inbox addresses" }),
+          ),
+          forward_to: t.Optional(t.Union([t.String(), t.Array(t.String())]), {
+            description: "Required for forward addresses",
+          }),
+        }),
+        detail: {
+          tags: ["Admin"],
+          summary: "Create an inbox or forward address",
+        },
+      },
+    )
+
+    .get(
+      "/addresses/:domain/:alias",
+      ({ params, set }) => {
+        try {
+          const domain = normalizeDomain(params.domain);
+          const alias = normalizeAlias(params.alias);
+          const row = getAddress(domain, alias);
+          if (!row) {
+            set.status = 404;
+            return { error: "address not found" };
+          }
+          const { password_hash, secret_key, ...safe } = row;
+          return { address: safe };
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        params: t.Object({ domain: t.String(), alias: t.String() }),
+        detail: {
+          tags: ["Admin"],
+          summary: "Get an address by domain and alias",
+        },
+      },
+    )
+
+    .delete(
+      "/addresses/:domain/:alias",
+      ({ params, set }) => {
+        try {
+          const domain = normalizeDomain(params.domain);
+          const alias = normalizeAlias(params.alias);
+          if (!deleteAddress(domain, alias)) {
+            set.status = 404;
+            return { error: "address not found" };
+          }
+          return { status: "deleted", domain, alias };
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        params: t.Object({ domain: t.String(), alias: t.String() }),
+        detail: { tags: ["Admin"], summary: "Delete an address" },
+      },
     );
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 400);
-  }
-}
-
-export async function adminGetAddress(request, domainName, aliasName) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
-
-  try {
-    const domain = normalizeDomain(domainName);
-    const alias = normalizeAlias(aliasName);
-    const row = getAddress(domain, alias);
-    if (!row) {
-      return jsonResponse({ error: "address not found" }, 404);
-    }
-
-    const safeAddress = { ...row };
-    delete safeAddress.password_hash;
-    delete safeAddress.secret_key;
-    return jsonResponse({ address: safeAddress });
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 400);
-  }
-}
-
-export async function adminDeleteAddress(request, domainName, aliasName) {
-  const auth = requireAdmin(request);
-  if (auth) return auth;
-
-  try {
-    const domain = normalizeDomain(domainName);
-    const alias = normalizeAlias(aliasName);
-    if (!deleteAddress(domain, alias)) {
-      return jsonResponse({ error: "address not found" }, 404);
-    }
-
-    return jsonResponse({ status: "deleted", domain, alias });
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 400);
-  }
 }

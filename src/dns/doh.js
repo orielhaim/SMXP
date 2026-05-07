@@ -1,3 +1,5 @@
+import { dohFetch } from "../shared/fetch.js";
+
 const DOH_ENDPOINTS = [
   "https://cloudflare-dns.com/dns-query",
   "https://dns.google/resolve",
@@ -12,16 +14,9 @@ export async function dohQuery(name, type, endpoints = DOH_ENDPOINTS) {
       url.searchParams.set("name", name);
       url.searchParams.set("type", type);
 
-      const res = await fetch(url.toString(), {
-        headers: { accept: "application/dns-json" },
-      });
+      const data = await dohFetch.get(url.toString()).json();
 
-      if (!res.ok) {
-        errors.push(`${endpoint}: ${res.status} ${res.statusText}`);
-        continue;
-      }
-
-      return await res.json();
+      return data;
     } catch (err) {
       errors.push(`${endpoint}: ${err.message}`);
     }

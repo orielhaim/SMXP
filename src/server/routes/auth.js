@@ -6,44 +6,37 @@ import {
   deleteToken,
   getTokensByAlias,
 } from "../../store/tokens.js";
-import { authenticate } from "../auth.js";
-
-function jsonResponse(body, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...extraHeaders },
-  });
-}
+import { withAuth } from "../auth.js";
 
 export function authRoutes() {
   return new Elysia({ prefix: "/.smxp/auth" })
+    .use(withAuth())
 
     .post(
       "/login",
-      async ({ body }) => {
-        const { alias, domain, password } = body;
-
-        const row = getAddress(domain, alias);
+      async ({ body, set }) => {
+        const row = getAddress(body.domain, body.alias);
         if (!row?.password_hash) {
-          return jsonResponse({ error: "invalid credentials" }, 401);
+          set.status = 401;
+          return { error: "invalid credentials" };
         }
 
-        const valid = await verifyPassword(password, row.password_hash);
+        const valid = await verifyPassword(body.password, row.password_hash);
         if (!valid) {
-          return jsonResponse({ error: "invalid credentials" }, 401);
+          set.status = 401;
+          return { error: "invalid credentials" };
         }
 
         const { token, id } = createToken({
-          alias,
-          domain,
+          alias: body.alias,
+          domain: body.domain,
           type: "session",
         });
-
-        return jsonResponse({
+        return {
           token,
           token_id: id,
           expires_at: Math.floor(Date.now() / 1000) + 7 * 24 * 3600,
-        });
+        };
       },
       {
         body: t.Object({
@@ -51,76 +44,91 @@ export function authRoutes() {
           domain: t.String({ minLength: 1 }),
           password: t.String({ minLength: 1 }),
         }),
+        detail: { tags: ["Auth"], summary: "Login and obtain a session token" },
       },
     )
 
-    .post("/logout", ({ request }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) {
-        return jsonResponse({ error: "unauthorized" }, 401);
-      }
-
-      deleteToken(authInfo.tokenId);
-      return jsonResponse({ status: "logged_out" });
-    })
+    .post(
+      "/logout",
+      ({ authInfo, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        deleteToken(authInfo.tokenId);
+        return { status: "logged_out" };
+      },
+      { detail: { tags: ["Auth"], summary: "Revoke current session token" } },
+    )
 
     .post(
       "/apikeys",
-      async ({ request, body }) => {
-        const authInfo = authenticate(request);
+      ({ authInfo, body, set }) => {
         if (!authInfo) {
-          return jsonResponse({ error: "unauthorized" }, 401);
+          set.status = 401;
+          return { error: "unauthorized" };
         }
-
-        const { name, expires_at } = body;
 
         const { token, id } = createToken({
           alias: authInfo.alias,
           domain: authInfo.domain,
           type: "apikey",
-          name: name || null,
-          expiresAt: expires_at || null,
+          name: body.name ?? null,
+          expiresAt: body.expires_at ?? null,
         });
 
-        return jsonResponse(
-          {
-            token,
-            id,
-            name: name || null,
-            expires_at: expires_at || null,
-          },
-          201,
-        );
+        set.status = 201;
+        return {
+          token,
+          id,
+          name: body.name ?? null,
+          expires_at: body.expires_at ?? null,
+        };
       },
       {
         body: t.Object({
           name: t.Optional(t.String()),
           expires_at: t.Optional(t.Nullable(t.Number())),
         }),
+        detail: { tags: ["Auth"], summary: "Create a new API key" },
       },
     )
 
-    .get("/apikeys", ({ request }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) {
-        return jsonResponse({ error: "unauthorized" }, 401);
-      }
+    .get(
+      "/apikeys",
+      ({ authInfo, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        return {
+          apikeys: getTokensByAlias(authInfo.alias, authInfo.domain, "apikey"),
+        };
+      },
+      {
+        detail: {
+          tags: ["Auth"],
+          summary: "List API keys for the authenticated address",
+        },
+      },
+    )
 
-      const keys = getTokensByAlias(authInfo.alias, authInfo.domain, "apikey");
-      return jsonResponse({ apikeys: keys });
-    })
-
-    .delete("/apikeys/:id", ({ request, params }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) {
-        return jsonResponse({ error: "unauthorized" }, 401);
-      }
-
-      const deleted = deleteToken(params.id);
-      if (!deleted) {
-        return jsonResponse({ error: "api key not found" }, 404);
-      }
-
-      return jsonResponse({ status: "deleted", id: params.id });
-    });
+    .delete(
+      "/apikeys/:id",
+      ({ authInfo, params, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        if (!deleteToken(params.id)) {
+          set.status = 404;
+          return { error: "api key not found" };
+        }
+        return { status: "deleted", id: params.id };
+      },
+      {
+        params: t.Object({ id: t.String() }),
+        detail: { tags: ["Auth"], summary: "Delete an API key by ID" },
+      },
+    );
 }
