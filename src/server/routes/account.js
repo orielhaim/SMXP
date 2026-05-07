@@ -3,33 +3,32 @@ import { hashPassword, verifyPassword } from "../../crypto/password.js";
 import { getAddress } from "../../store/addresses.js";
 import { getDb } from "../../store/db.js";
 import { deleteToken, getTokensByAlias } from "../../store/tokens.js";
-import { authenticate, maybeRefreshToken } from "../auth.js";
+import { maybeRefreshToken, withAuth } from "../auth.js";
 
-function jsonResponse(body, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...extraHeaders },
-  });
-}
-
-function authedResponse(body, authInfo, status = 200) {
-  const headers = { "Content-Type": "application/json" };
-  maybeRefreshToken(headers, authInfo);
-  return new Response(JSON.stringify(body), { status, headers });
+function unauthorized() {
+  return { error: "unauthorized" };
 }
 
 export function accountRoutes() {
   return new Elysia({ prefix: "/.smxp/account" })
+    .use(withAuth())
 
-    .get("/info", ({ request }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
+    .get(
+      "/info",
+      ({ authInfo, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return unauthorized();
+        }
 
-      const address = getAddress(authInfo.domain, authInfo.alias);
-      if (!address) return jsonResponse({ error: "address not found" }, 404);
+        const address = getAddress(authInfo.domain, authInfo.alias);
+        if (!address) {
+          set.status = 404;
+          return { error: "address not found" };
+        }
 
-      return authedResponse(
-        {
+        maybeRefreshToken(set.headers, authInfo);
+        return {
           alias: address.alias,
           domain: address.domain,
           address: `${address.alias}@${address.domain}`,
@@ -38,85 +37,119 @@ export function accountRoutes() {
           key_id: address.key_id,
           algorithm: address.algorithm,
           created_at: address.created_at,
+        };
+      },
+      {
+        detail: {
+          tags: ["Account"],
+          summary: "Get account info for the authenticated address",
         },
-        authInfo,
-      );
-    })
+      },
+    )
 
     .put(
       "/password",
-      async ({ request, body }) => {
-        const authInfo = authenticate(request);
-        if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
+      async ({ authInfo, body, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return unauthorized();
+        }
 
         const address = getAddress(authInfo.domain, authInfo.alias);
-        if (!address) return jsonResponse({ error: "address not found" }, 404);
+        if (!address) {
+          set.status = 404;
+          return { error: "address not found" };
+        }
 
         const valid = await verifyPassword(
           body.current_password,
           address.password_hash,
         );
         if (!valid) {
-          return jsonResponse({ error: "current password is incorrect" }, 403);
+          set.status = 403;
+          return { error: "current password is incorrect" };
         }
 
-        const newHash = await hashPassword(body.new_password);
         const db = getDb();
         db.run(
           `UPDATE addresses SET password_hash = ? WHERE alias = ? AND domain = ?`,
-          [newHash, authInfo.alias, authInfo.domain],
+          [
+            await hashPassword(body.new_password),
+            authInfo.alias,
+            authInfo.domain,
+          ],
         );
 
-        return authedResponse({ status: "password_changed" }, authInfo);
+        maybeRefreshToken(set.headers, authInfo);
+        return { status: "password_changed" };
       },
       {
         body: t.Object({
           current_password: t.String({ minLength: 1 }),
-          new_password: t.String({ minLength: 1 }),
+          new_password: t.String({
+            minLength: 8,
+            description: "At least 8 characters",
+          }),
         }),
+        detail: { tags: ["Account"], summary: "Change account password" },
       },
     )
 
-    .get("/sessions", ({ request }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
+    .get(
+      "/sessions",
+      ({ authInfo, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return unauthorized();
+        }
 
-      const sessions = getTokensByAlias(
-        authInfo.alias,
-        authInfo.domain,
-        "session",
-      );
+        const sessions = getTokensByAlias(
+          authInfo.alias,
+          authInfo.domain,
+          "session",
+        ).map((s) => ({
+          ...s,
+          current: s.id === authInfo.tokenId,
+        }));
 
-      const mapped = sessions.map((s) => ({
-        ...s,
-        current: s.id === authInfo.tokenId,
-      }));
+        maybeRefreshToken(set.headers, authInfo);
+        return { sessions };
+      },
+      { detail: { tags: ["Account"], summary: "List all active sessions" } },
+    )
 
-      return authedResponse({ sessions: mapped }, authInfo);
-    })
+    .delete(
+      "/sessions/:id",
+      ({ authInfo, params, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return unauthorized();
+        }
 
-    .delete("/sessions/:id", ({ request, params }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
+        if (params.id === authInfo.tokenId) {
+          set.status = 400;
+          return { error: "cannot revoke current session, use /auth/logout" };
+        }
 
-      if (params.id === authInfo.tokenId) {
-        return jsonResponse(
-          { error: "cannot revoke current session, use logout" },
-          400,
-        );
-      }
+        const db = getDb();
+        const row = db
+          .query(
+            `SELECT id FROM tokens WHERE id = ? AND alias = ? AND domain = ? AND type = 'session'`,
+          )
+          .get(params.id, authInfo.alias, authInfo.domain);
 
-      const db = getDb();
-      const row = db
-        .query(
-          `SELECT id FROM tokens
-           WHERE id = ? AND alias = ? AND domain = ? AND type = 'session'`,
-        )
-        .get(params.id, authInfo.alias, authInfo.domain);
+        if (!row) {
+          set.status = 404;
+          return { error: "session not found" };
+        }
 
-      if (!row) return jsonResponse({ error: "session not found" }, 404);
-
-      deleteToken(params.id);
-      return authedResponse({ status: "revoked", id: params.id }, authInfo);
-    });
+        deleteToken(params.id);
+        maybeRefreshToken(set.headers, authInfo);
+        return { status: "revoked", id: params.id };
+      },
+      {
+        params: t.Object({ id: t.String() }),
+        detail: { tags: ["Account"], summary: "Revoke a session by ID" },
+      },
+    );
 }

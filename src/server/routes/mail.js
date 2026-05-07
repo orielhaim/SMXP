@@ -6,31 +6,28 @@ import {
   decodeCursor,
 } from "../../shared/cursor.js";
 import { getDb } from "../../store/db.js";
-import { authenticate, maybeRefreshToken } from "../auth.js";
+import { maybeRefreshToken, withAuth } from "../auth.js";
 
-function jsonResponse(body, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...extraHeaders },
-  });
-}
+const PaginationQuery = t.Object({
+  limit: t.Optional(
+    t.String({ description: "Max results (1-100, default 20)" }),
+  ),
+  after: t.Optional(t.String({ description: "Cursor for next page" })),
+  before: t.Optional(t.String({ description: "Cursor for previous page" })),
+});
 
-function authedResponse(body, authInfo, status = 200) {
-  const headers = { "Content-Type": "application/json" };
-  maybeRefreshToken(headers, authInfo);
-  return new Response(JSON.stringify(body), { status, headers });
-}
+const MessageType = t.Union([
+  t.Literal("message"),
+  t.Literal("edit"),
+  t.Literal("delete"),
+  t.Literal("receipt"),
+]);
 
-function mapMessageRow(row) {
-  return {
-    ...row,
-    expires: row.expires_at,
-  };
-}
-
-function getAddress(authInfo) {
-  return `${authInfo.alias}@${authInfo.domain}`;
-}
+const ContentType = t.Union([
+  t.Literal("text"),
+  t.Literal("markdown"),
+  t.Literal("html"),
+]);
 
 function queryMessages(
   direction,
@@ -40,183 +37,194 @@ function queryMessages(
 ) {
   const db = getDb();
   const safeLimit = clampLimit(limit);
-  let query;
+
+  let sql;
   let params;
 
   if (after) {
-    const cursor = decodeCursor(after);
-    query = `
-      SELECT * FROM messages
-      WHERE direction = ? AND ${addressField} = ?
-        AND (created_at < ? OR (created_at = ? AND id < ?))
-      ORDER BY created_at DESC, id DESC
-      LIMIT ?
-    `;
-    params = [
-      direction,
-      address,
-      cursor.timestamp,
-      cursor.timestamp,
-      cursor.id,
-      safeLimit,
-    ];
+    const c = decodeCursor(after);
+    sql = `SELECT * FROM messages
+           WHERE direction = ? AND ${addressField} = ?
+             AND (created_at < ? OR (created_at = ? AND id < ?))
+           ORDER BY created_at DESC, id DESC LIMIT ?`;
+    params = [direction, address, c.timestamp, c.timestamp, c.id, safeLimit];
   } else if (before) {
-    const cursor = decodeCursor(before);
-    query = `
-      SELECT * FROM messages
-      WHERE direction = ? AND ${addressField} = ?
-        AND (created_at > ? OR (created_at = ? AND id > ?))
-      ORDER BY created_at ASC, id ASC
-      LIMIT ?
-    `;
-    params = [
-      direction,
-      address,
-      cursor.timestamp,
-      cursor.timestamp,
-      cursor.id,
-      safeLimit,
-    ];
+    const c = decodeCursor(before);
+    sql = `SELECT * FROM messages
+           WHERE direction = ? AND ${addressField} = ?
+             AND (created_at > ? OR (created_at = ? AND id > ?))
+           ORDER BY created_at ASC, id ASC LIMIT ?`;
+    params = [direction, address, c.timestamp, c.timestamp, c.id, safeLimit];
   } else {
-    query = `
-      SELECT * FROM messages
-      WHERE direction = ? AND ${addressField} = ?
-      ORDER BY created_at DESC, id DESC
-      LIMIT ?
-    `;
+    sql = `SELECT * FROM messages
+           WHERE direction = ? AND ${addressField} = ?
+           ORDER BY created_at DESC, id DESC LIMIT ?`;
     params = [direction, address, safeLimit];
   }
 
-  const rows = db.query(query).all(...params);
-
+  const rows = db.query(sql).all(...params);
   if (before) rows.reverse();
-
   return { rows, limit: safeLimit };
 }
 
 export function mailRoutes() {
   return new Elysia({ prefix: "/.smxp/mail" })
+    .use(withAuth())
 
-    .get("/inbox", ({ request, query }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
+    .get(
+      "/inbox",
+      ({ authInfo, query, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const address = `${authInfo.alias}@${authInfo.domain}`;
+        const { rows, limit } = queryMessages(
+          "in",
+          "delivered_to",
+          address,
+          query,
+        );
+        const { cursors } = buildPaginatedResponse(rows, limit);
+        maybeRefreshToken(set.headers, authInfo);
+        return { messages: rows, cursors };
+      },
+      {
+        query: PaginationQuery,
+        detail: { tags: ["Mail"], summary: "List inbox messages" },
+      },
+    )
 
-      const address = getAddress(authInfo);
-      const { rows, limit } = queryMessages(
-        "in",
-        "delivered_to",
-        address,
-        query,
-      );
-      const messages = rows.map(mapMessageRow);
-      const pagination = buildPaginatedResponse(messages, limit);
+    .get(
+      "/sent",
+      ({ authInfo, query, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const address = `${authInfo.alias}@${authInfo.domain}`;
+        const { rows, limit } = queryMessages("out", "sender", address, query);
+        const { cursors } = buildPaginatedResponse(rows, limit);
+        maybeRefreshToken(set.headers, authInfo);
+        return { messages: rows, cursors };
+      },
+      {
+        query: PaginationQuery,
+        detail: { tags: ["Mail"], summary: "List sent messages" },
+      },
+    )
 
-      return authedResponse(
-        { messages, cursors: pagination.cursors },
-        authInfo,
-      );
-    })
+    .get(
+      "/messages/:id",
+      ({ authInfo, params, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const address = `${authInfo.alias}@${authInfo.domain}`;
+        const row = getDb()
+          .query(
+            `SELECT * FROM messages WHERE id = ? AND (delivered_to = ? OR sender = ?)`,
+          )
+          .get(params.id, address, address);
 
-    .get("/sent", ({ request, query }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
+        if (!row) {
+          set.status = 404;
+          return { error: "message not found" };
+        }
+        maybeRefreshToken(set.headers, authInfo);
+        return { message: row };
+      },
+      {
+        params: t.Object({ id: t.String() }),
+        detail: { tags: ["Mail"], summary: "Get a single message by ID" },
+      },
+    )
 
-      const address = getAddress(authInfo);
-      const { rows, limit } = queryMessages("out", "sender", address, query);
-      const messages = rows.map(mapMessageRow);
-      const pagination = buildPaginatedResponse(messages, limit);
+    .get(
+      "/threads/:id",
+      ({ authInfo, params, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const address = `${authInfo.alias}@${authInfo.domain}`;
+        const db = getDb();
 
-      return authedResponse(
-        { messages, cursors: pagination.cursors },
-        authInfo,
-      );
-    })
+        const root = db
+          .query(
+            `SELECT conversation_id FROM messages
+             WHERE id = ? AND (delivered_to = ? OR sender = ?)`,
+          )
+          .get(params.id, address, address);
 
-    .get("/message/:id", ({ request, params }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
+        if (!root) {
+          set.status = 404;
+          return { error: "thread not found" };
+        }
 
-      const db = getDb();
-      const address = getAddress(authInfo);
-      const row = db
-        .query(
-          `SELECT * FROM messages
-           WHERE id = ? AND (delivered_to = ? OR sender = ?)`,
-        )
-        .get(params.id, address, address);
+        const messages = db
+          .query(
+            `SELECT * FROM messages
+             WHERE (delivered_to = ? OR sender = ?) AND conversation_id = ?
+             ORDER BY created_at ASC`,
+          )
+          .all(address, address, root.conversation_id);
 
-      if (!row) return jsonResponse({ error: "message not found" }, 404);
-
-      return authedResponse({ message: mapMessageRow(row) }, authInfo);
-    })
-
-    .get("/thread/:id", ({ request, params }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
-
-      const db = getDb();
-      const address = getAddress(authInfo);
-
-      const root = db
-        .query(
-          `SELECT conversation_id FROM messages
-           WHERE id = ? AND (delivered_to = ? OR sender = ?)`,
-        )
-        .get(params.id, address, address);
-
-      if (!root) return jsonResponse({ error: "thread not found" }, 404);
-
-      const thread = db
-        .query(
-          `SELECT * FROM messages
-           WHERE (delivered_to = ? OR sender = ?)
-             AND conversation_id = ?
-           ORDER BY created_at ASC`,
-        )
-        .all(address, address, root.conversation_id);
-
-      return authedResponse({ messages: thread.map(mapMessageRow) }, authInfo);
-    })
+        maybeRefreshToken(set.headers, authInfo);
+        return { messages };
+      },
+      {
+        params: t.Object({
+          id: t.String({ description: "Any message ID within the thread" }),
+        }),
+        detail: {
+          tags: ["Mail"],
+          summary: "Get all messages in a thread by any message ID",
+        },
+      },
+    )
 
     .post(
       "/send",
-      async ({ request, body }) => {
-        const authInfo = authenticate(request);
-        if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
+      async ({ authInfo, body, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
 
         const { sendMessage } = await import("../../client/send.js");
-        const address = getAddress(authInfo);
+        const address = `${authInfo.alias}@${authInfo.domain}`;
+        const recipients = Array.isArray(body.to) ? body.to : [body.to];
 
         try {
-          const recipients = Array.isArray(body.to) ? body.to : [body.to];
           const results = [];
-
           for (const to of recipients) {
-            const conversation_id = body.conversation_id || uuidv4();
-
+            const conversation_id = body.conversation_id ?? uuidv4();
             const result = await sendMessage({
               from: address,
               to,
-              subject: body.subject || "",
-              body: body.body || "",
-              type: body.type || "message",
+              subject: body.subject ?? "",
+              body: body.body ?? "",
+              type: body.type ?? "message",
               conversation_id,
-              in_reply_to: body.in_reply_to || null,
-              content_type: body.content_type || "text",
-              on_behalf_of: body.on_behalf_of || null,
+              in_reply_to: body.in_reply_to ?? null,
+              content_type: body.content_type ?? "text",
+              on_behalf_of: body.on_behalf_of ?? null,
             });
-
             results.push({
               status: "sent",
               to,
-              id: result?.envelope?.id || null,
+              id: result?.envelope?.id ?? null,
               conversation_id,
             });
           }
-
-          return authedResponse({ status: "sent", results }, authInfo, 201);
+          set.status = 201;
+          maybeRefreshToken(set.headers, authInfo);
+          return { status: "sent", results };
         } catch (err) {
-          return jsonResponse({ error: err.message }, 500);
+          set.status = 500;
+          return { error: err.message };
         }
       },
       {
@@ -225,104 +233,116 @@ export function mailRoutes() {
             t.String({ minLength: 1 }),
             t.Array(t.String({ minLength: 1 })),
           ]),
-          body: t.Optional(t.String()),
           subject: t.Optional(t.String()),
-          type: t.Optional(
-            t.Union([
-              t.Literal("message"),
-              t.Literal("edit"),
-              t.Literal("delete"),
-              t.Literal("receipt"),
-            ]),
-          ),
+          body: t.Optional(t.String()),
+          type: t.Optional(MessageType),
           conversation_id: t.Optional(t.String()),
           in_reply_to: t.Optional(t.String()),
-          content_type: t.Optional(t.String()),
+          content_type: t.Optional(ContentType),
           on_behalf_of: t.Optional(t.String()),
         }),
+        detail: {
+          tags: ["Mail"],
+          summary: "Send a message to one or more recipients",
+        },
       },
     )
 
-    .post("/read/:id", ({ request, params }) => {
-      const authInfo = authenticate(request);
-      if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
+    .post(
+      "/messages/:id/read",
+      ({ authInfo, params, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const address = `${authInfo.alias}@${authInfo.domain}`;
+        const db = getDb();
+        const row = db
+          .query(`SELECT id FROM messages WHERE id = ? AND delivered_to = ?`)
+          .get(params.id, address);
 
-      const db = getDb();
-      const address = getAddress(authInfo);
-
-      const row = db
-        .query(`SELECT id FROM messages WHERE id = ? AND delivered_to = ?`)
-        .get(params.id, address);
-
-      if (!row) return jsonResponse({ error: "message not found" }, 404);
-
-      db.run(
-        `UPDATE messages SET verified = 2 WHERE id = ? AND delivered_to = ?`,
-        [params.id, address],
-      );
-
-      return authedResponse({ status: "read", id: params.id }, authInfo);
-    })
+        if (!row) {
+          set.status = 404;
+          return { error: "message not found" };
+        }
+        db.run(
+          `UPDATE messages SET verified = 2 WHERE id = ? AND delivered_to = ?`,
+          [params.id, address],
+        );
+        maybeRefreshToken(set.headers, authInfo);
+        return { status: "read", id: params.id };
+      },
+      {
+        params: t.Object({ id: t.String() }),
+        detail: { tags: ["Mail"], summary: "Mark a message as read" },
+      },
+    )
 
     .post(
-      "/edit/:id",
-      async ({ request, params, body }) => {
-        const authInfo = authenticate(request);
-        if (!authInfo) return jsonResponse({ error: "unauthorized" }, 401);
-
+      "/messages/:id/edit",
+      async ({ authInfo, params, body, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+        const address = `${authInfo.alias}@${authInfo.domain}`;
         const db = getDb();
-        const address = getAddress(authInfo);
-
         const row = db
           .query(
-            `SELECT id, conversation_id FROM messages WHERE id = ? AND sender = ? AND direction = 'out'`,
+            `SELECT id, conversation_id FROM messages
+             WHERE id = ? AND sender = ? AND direction = 'out'`,
           )
           .get(params.id, address);
 
-        if (!row) return jsonResponse({ error: "message not found" }, 404);
+        if (!row) {
+          set.status = 404;
+          return { error: "message not found" };
+        }
 
         const { sendMessage } = await import("../../client/send.js");
+        const recipients = Array.isArray(body.to) ? body.to : [body.to];
 
         try {
-          const recipients = Array.isArray(body.to) ? body.to : [body.to];
           const results = [];
-
           for (const to of recipients) {
             const result = await sendMessage({
               from: address,
               to,
-              subject: body.subject || "",
-              body: body.body || "",
+              subject: body.subject ?? "",
+              body: body.body ?? "",
               type: "edit",
               conversation_id: row.conversation_id,
               in_reply_to: params.id,
-              content_type: body.content_type || "text",
-              on_behalf_of: body.on_behalf_of || null,
+              content_type: body.content_type ?? "text",
+              on_behalf_of: body.on_behalf_of ?? null,
             });
             results.push({
               status: "edited",
               to,
-              id: result?.envelope?.id || null,
+              id: result?.envelope?.id ?? null,
               original_id: params.id,
             });
           }
-
-          return authedResponse({ status: "edited", results }, authInfo);
+          maybeRefreshToken(set.headers, authInfo);
+          return { status: "edited", results };
         } catch (err) {
-          return jsonResponse({ error: err.message }, 500);
+          set.status = 500;
+          return { error: err.message };
         }
       },
       {
+        params: t.Object({ id: t.String() }),
         body: t.Object({
           to: t.Union([
             t.String({ minLength: 1 }),
             t.Array(t.String({ minLength: 1 })),
           ]),
-          body: t.Optional(t.String()),
           subject: t.Optional(t.String()),
-          content_type: t.Optional(t.String()),
+          body: t.Optional(t.String()),
+          content_type: t.Optional(ContentType),
           on_behalf_of: t.Optional(t.String()),
         }),
+        detail: { tags: ["Mail"], summary: "Edit a sent message" },
       },
     );
 }

@@ -1,20 +1,13 @@
-import { Elysia } from "elysia";
+import { openapi } from "@elysia/openapi";
+import { Elysia, t } from "elysia";
 import config from "../config.js";
+import { signObject } from "../crypto/sign.js";
+import { getAddress } from "../store/addresses.js";
+import { getDb } from "../store/db.js";
+import { getDelegationByDelegate } from "../store/delegations.js";
 import { getAllDomains } from "../store/domains.js";
 import { ensureServerKeys } from "../store/server-config.js";
-import {
-  adminCreateAddress,
-  adminCreateDomain,
-  adminDeleteAddress,
-  adminDeleteDomain,
-  adminGetAddress,
-  adminGetDomain,
-  adminListAddresses,
-  adminListDomains,
-  adminVerifyDomain,
-} from "./admin.js";
-import { handleDelegationsRequest } from "./delegations-endpoint.js";
-import { handleKeysRequest } from "./keys-endpoint.js";
+import { adminRoutes } from "./admin.js";
 import { handleReceive } from "./receive.js";
 import { accountRoutes } from "./routes/account.js";
 import { authRoutes } from "./routes/auth.js";
@@ -22,74 +15,217 @@ import { delegationsRoutes } from "./routes/delegations.js";
 import { mailRoutes } from "./routes/mail.js";
 import { streamRoutes } from "./routes/stream.js";
 
-export function handleServerKeyRequest() {
-  const serverKeys = ensureServerKeys();
-
-  return new Response(
-    JSON.stringify({
-      public_key: serverKeys.public_key,
-      key_id: serverKeys.key_id,
-      algorithm: serverKeys.algorithm,
-    }),
-    {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    },
-  );
+function serverKeyHandler() {
+  const { public_key, key_id, algorithm } = ensureServerKeys();
+  return { public_key, key_id, algorithm };
 }
 
-export function createServerApp() {
+function keysHandler(domain, alias) {
+  const d = domain.trim().toLowerCase();
+  const a = alias.trim().toLowerCase();
+  const address = getAddress(d, a);
+
+  if (!address || address.mode !== "inbox") {
+    return new Response(JSON.stringify({ error: "inbox address not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const db = getDb();
+  const serverKey = db
+    .query(`SELECT value FROM server_config WHERE key = ?`)
+    .get("server_secret_key");
+  const serverKeyId = db
+    .query(`SELECT value FROM server_config WHERE key = ?`)
+    .get("server_key_id");
+
+  if (!serverKey || !serverKeyId) {
+    return new Response(JSON.stringify({ error: "server not configured" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const payload = {
+    alias: a,
+    domain: d,
+    public_key: address.public_key,
+    key_id: address.key_id,
+    algorithm: address.algorithm,
+  };
+
+  return {
+    ...payload,
+    server_signature: signObject(payload, serverKey.value),
+    server_key_id: serverKeyId.value,
+  };
+}
+
+function delegationsHandler(request, domain) {
+  const url = new URL(request.url);
+  const alias = url.searchParams.get("alias");
+  const delegate = url.searchParams.get("delegate");
+
+  if (!alias || !delegate) {
+    return new Response(
+      JSON.stringify({ error: "alias and delegate query params are required" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  const d = domain.trim().toLowerCase();
+  const a = alias.trim().toLowerCase();
+  const address = getAddress(d, a);
+
+  if (!address || address.mode !== "inbox") {
+    return new Response(JSON.stringify({ error: "inbox address not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const delegation = getDelegationByDelegate(d, a, delegate);
+  if (!delegation) {
+    return new Response(JSON.stringify({ error: "delegation not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (delegation.expires_at !== null && delegation.expires_at < now) {
+    return new Response(JSON.stringify({ error: "delegation expired" }), {
+      status: 410,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const payload = {
+    alias: a,
+    domain: d,
+    delegate: delegation.delegate,
+    scope: delegation.scope,
+    created_at: delegation.created_at,
+    expires_at: delegation.expires_at,
+  };
+
+  return {
+    ...payload,
+    signature: signObject(payload, address.secret_key),
+    key_id: address.key_id,
+  };
+}
+
+export function createApp() {
   return new Elysia()
+    .use(
+      openapi({
+        exclude: {
+          staticFile: false,
+        },
+        documentation: {
+          info: {
+            title: "SMXP API",
+            version: "1.0.0",
+            description: "Simple Message eXchange Protocol",
+          },
+          tags: [
+            { name: "Auth", description: "Session and API key management" },
+            {
+              name: "Mail",
+              description: "Send, receive, and manage messages",
+            },
+            {
+              name: "Account",
+              description: "Account info, password, and sessions",
+            },
+            {
+              name: "Delegations",
+              description: "Grant and manage delegations",
+            },
+            { name: "Stream", description: "Real-time SSE message stream" },
+            {
+              name: "Admin",
+              description: "Server administration (requires admin secret)",
+            },
+            {
+              name: "Protocol",
+              description: "Federation protocol endpoints (server-to-server)",
+            },
+          ],
+        },
+      }),
+    )
+
     .use(authRoutes())
     .use(mailRoutes())
     .use(accountRoutes())
     .use(delegationsRoutes())
     .use(streamRoutes())
-    .post("/.smxp/receive", ({ request }) => handleReceive(request))
-    .get("/.well-known/smxp/keys/:domain/:alias", ({ params }) =>
-      handleKeysRequest(params.domain, params.alias),
+
+    .use(adminRoutes())
+
+    .post("/.smxp/receive", ({ request }) => handleReceive(request), {
+      detail: {
+        tags: ["Protocol"],
+        summary: "Receive an inbound message envelope",
+      },
+    })
+
+    .get(
+      "/.well-known/smxp/keys/:domain/:alias",
+      ({ params }) => keysHandler(params.domain, params.alias),
+      {
+        params: t.Object({ domain: t.String(), alias: t.String() }),
+        detail: {
+          tags: ["Protocol"],
+          summary: "Fetch the public signing key for an address",
+        },
+      },
     )
-    .get("/.well-known/smxp/delegations/:domain", ({ request, params }) =>
-      handleDelegationsRequest(request, params.domain),
+
+    .get(
+      "/.well-known/smxp/delegations/:domain",
+      ({ request, params }) => delegationsHandler(request, params.domain),
+      {
+        params: t.Object({ domain: t.String() }),
+        detail: {
+          tags: ["Protocol"],
+          summary: "Fetch a signed delegation record",
+        },
+      },
     )
-    .get("/.smxp/admin/domains", ({ request }) => adminListDomains(request))
-    .post("/.smxp/admin/domains", ({ request }) => adminCreateDomain(request))
-    .get("/.smxp/admin/domains/:domain", ({ request, params }) =>
-      adminGetDomain(request, params.domain),
-    )
-    .post("/.smxp/admin/domains/:domain/verify", ({ request, params }) =>
-      adminVerifyDomain(request, params.domain),
-    )
-    .delete("/.smxp/admin/domains/:domain", ({ request, params }) =>
-      adminDeleteDomain(request, params.domain),
-    )
-    .get("/.smxp/admin/addresses", ({ request }) => adminListAddresses(request))
-    .post("/.smxp/admin/addresses", ({ request }) =>
-      adminCreateAddress(request),
-    )
-    .get("/.smxp/admin/addresses/:domain/:alias", ({ request, params }) =>
-      adminGetAddress(request, params.domain, params.alias),
-    )
-    .delete("/.smxp/admin/addresses/:domain/:alias", ({ request, params }) =>
-      adminDeleteAddress(request, params.domain, params.alias),
-    )
-    .get("/.smxp/server-key", () => handleServerKeyRequest())
-    .get("/.smxp/health", () => ({
-      status: "ok",
-      domains: getAllDomains().map((domain) => domain.domain),
-      port: config.port,
-    }));
+    .get("/.smxp/server-key", () => serverKeyHandler(), {
+      detail: {
+        tags: ["Protocol"],
+        summary: "Fetch this server's public key",
+      },
+    })
+
+    .get(
+      "/.smxp/health",
+      () => ({
+        status: "ok",
+        domains: getAllDomains().map((d) => d.domain),
+        port: config.port,
+      }),
+      { detail: { tags: ["Protocol"], summary: "Health check" } },
+    );
 }
 
 export function startServer() {
-  const app = createServerApp().listen({
-    hostname: config.host,
-    port: config.port,
-  });
+  const app = createApp().listen({ hostname: config.host, port: config.port });
 
-  const domains = getAllDomains().map((domain) => domain.domain);
+  const domains = getAllDomains().map((d) => d.domain);
+  const displayHost = config.host === "0.0.0.0" ? "localhost" : config.host;
+
   console.log(
-    `[SMXP] Server listening on localhost:${config.port} for domains ${domains.join(", ") || "(none)"}`,
+    `[SMXP] Listening on ${config.host}:${config.port} | domains: ${domains.join(", ") || "(none)"}`,
   );
+  console.log(
+    `[SMXP] OpenAPI UI → http://${displayHost}:${config.port}/openapi`,
+  );
+
   return app;
 }

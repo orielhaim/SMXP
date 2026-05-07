@@ -1,4 +1,5 @@
 import { buildBaseUrl, resolveTarget } from "../client/resolve.js";
+import { smxpFetch } from "../shared/fetch.js";
 import { fingerprintPublicKey } from "../crypto/keys.js";
 import { verifyObjectSignature, verifySignature } from "../crypto/verify.js";
 import { discoverSmxp } from "../dns/discover.js";
@@ -45,13 +46,8 @@ export async function fetchServerPublicKey(domain) {
   const resolved = resolveTarget(domain);
   const target = resolved || (await discoverSmxp(domain));
   const url = `${buildBaseUrl(target.host, target.port)}/.smxp/server-key`;
-  const res = await fetch(url);
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch server key from ${domain}`);
-  }
-
-  const serverKeyInfo = await res.json();
+  const serverKeyInfo = await smxpFetch.get(url).json();
 
   if (shouldVerifyDnsFingerprint(domain)) {
     const dnsFingerprint = await fetchDnsFingerprint(domain);
@@ -72,13 +68,8 @@ export async function fetchAliasPublicKey(domain, alias) {
   const target = resolved || (await discoverSmxp(domain));
   const baseUrl = buildBaseUrl(target.host, target.port);
   const url = `${baseUrl}/.well-known/smxp/keys/${encodeURIComponent(domain)}/${encodeURIComponent(alias)}`;
-  const res = await fetch(url);
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch alias key: ${res.status}`);
-  }
-
-  return await res.json();
+  return await smxpFetch.get(url).json();
 }
 
 export async function fetchAliasDelegation(domain, alias, delegate) {
@@ -86,13 +77,8 @@ export async function fetchAliasDelegation(domain, alias, delegate) {
   const target = resolved || (await discoverSmxp(domain));
   const baseUrl = buildBaseUrl(target.host, target.port);
   const url = `${baseUrl}/.well-known/smxp/delegations/${encodeURIComponent(domain)}?alias=${encodeURIComponent(alias)}&delegate=${encodeURIComponent(delegate)}`;
-  const res = await fetch(url);
 
-  if (!res.ok) {
-    throw new Error(`Failed to fetch alias delegation: ${res.status}`);
-  }
-
-  return await res.json();
+  return await smxpFetch.get(url).json();
 }
 
 export async function verifyDelegation(

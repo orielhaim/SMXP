@@ -1,3 +1,4 @@
+import { Elysia } from "elysia";
 import { verifyObjectSignature } from "../crypto/verify.js";
 import { parseAddress } from "../shared/address.js";
 import {
@@ -9,31 +10,20 @@ import {
 } from "../store/tokens.js";
 import { fetchAliasPublicKey, verifyDelegation } from "./verification.js";
 
-export async function authenticate(req) {
-  const auth = req.headers.get("authorization");
+export async function authenticate(request) {
+  const auth = request.headers.get("authorization") ?? "";
+  const url = new URL(request.url);
 
-  let urlStr = req.url;
-  // Fallback for mock req objects
-  if (!urlStr && req.headers) {
-    urlStr = "http://localhost/";
-  }
-  const url = new URL(urlStr);
-
-  const token = auth?.startsWith("Bearer ")
+  const bearer = auth.startsWith("Bearer ")
     ? auth.slice(7)
     : url.searchParams.get("token");
-
-  if (token) {
-    const hash = hashToken(token);
-    const row = findTokenByHash(hash);
-
+  if (bearer) {
+    const row = findTokenByHash(hashToken(bearer));
     if (row) {
       if (row.expires_at && row.expires_at < Math.floor(Date.now() / 1000)) {
         return null;
       }
-
       updateLastUsed(row.id);
-
       return {
         alias: row.alias,
         domain: row.domain,
@@ -44,35 +34,33 @@ export async function authenticate(req) {
     }
   }
 
-  const sigHeader = auth?.startsWith("Signature ") ? auth.slice(10) : null;
-  let payloadStr = url.searchParams.get("payload");
-  let signatureStr = url.searchParams.get("signature");
+  let payloadStr = null;
+  let signatureStr = null;
 
-  if (sigHeader) {
-    const matchPayload = sigHeader.match(/payload="([^"]+)"/);
-    const matchSig = sigHeader.match(/signature="([^"]+)"/);
-    if (matchPayload && matchSig) {
-      payloadStr = matchPayload[1];
-      signatureStr = matchSig[1];
+  if (auth.startsWith("Signature ")) {
+    const sig = auth.slice(10);
+    const mPayload = sig.match(/payload="([^"]+)"/);
+    const mSig = sig.match(/signature="([^"]+)"/);
+    if (mPayload && mSig) {
+      payloadStr = mPayload[1];
+      signatureStr = mSig[1];
     }
+  } else {
+    payloadStr = url.searchParams.get("payload");
+    signatureStr = url.searchParams.get("signature");
   }
 
   if (payloadStr && signatureStr) {
     try {
-      const decodedPayload = Buffer.from(payloadStr, "base64url").toString(
-        "utf8",
+      const payload = JSON.parse(
+        Buffer.from(payloadStr, "base64url").toString("utf8"),
       );
-      const payload = JSON.parse(decodedPayload);
-
       const { delegate, on_behalf_of, timestamp } = payload;
 
       if (!delegate || !on_behalf_of || !timestamp) return null;
 
       const now = Math.floor(Date.now() / 1000);
-      if (Math.abs(now - timestamp) > 300) {
-        // 5 minutes tolerance
-        return null; // Expired or future signature
-      }
+      if (Math.abs(now - timestamp) > 300) return null;
 
       const delegateAddr = parseAddress(delegate);
       const onBehalfOfAddr = parseAddress(on_behalf_of);
@@ -83,26 +71,20 @@ export async function authenticate(req) {
         "read",
       );
 
-      const aliasKeyResponse = await fetchAliasPublicKey(
+      const aliasKey = await fetchAliasPublicKey(
         delegateAddr.domain,
         delegateAddr.localPart,
       );
-      const isValid = verifyObjectSignature(
-        payload,
-        signatureStr,
-        aliasKeyResponse.public_key,
-      );
+      if (!verifyObjectSignature(payload, signatureStr, aliasKey.public_key))
+        return null;
 
-      if (isValid) {
-        return {
-          alias: onBehalfOfAddr.localPart,
-          domain: onBehalfOfAddr.domain,
-          type: "delegation",
-          delegate: delegateAddr.address,
-        };
-      }
-    } catch (e) {
-      console.error("Signature auth error:", e);
+      return {
+        alias: onBehalfOfAddr.localPart,
+        domain: onBehalfOfAddr.domain,
+        type: "delegation",
+        delegate: delegateAddr.address,
+      };
+    } catch {
       return null;
     }
   }
@@ -110,19 +92,23 @@ export async function authenticate(req) {
   return null;
 }
 
+export function withAuth() {
+  return new Elysia({ name: "with-auth" }).derive(
+    { as: "scoped" },
+    async ({ request }) => ({ authInfo: await authenticate(request) }),
+  );
+}
+
 export function maybeRefreshToken(headers, authInfo) {
   if (!authInfo || authInfo.type !== "session" || !authInfo.expiresAt) return;
 
-  const now = Math.floor(Date.now() / 1000);
-  const remaining = authInfo.expiresAt - now;
-
+  const remaining = authInfo.expiresAt - Math.floor(Date.now() / 1000);
   if (remaining < SESSION_LIFETIME * 0.25) {
-    const { token: newToken } = createToken({
+    const { token } = createToken({
       alias: authInfo.alias,
       domain: authInfo.domain,
       type: "session",
     });
-
-    headers["X-SMXP-Token-Refresh"] = newToken;
+    headers["X-SMXP-Token-Refresh"] = token;
   }
 }
