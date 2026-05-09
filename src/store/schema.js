@@ -78,44 +78,6 @@ export function initSchema() {
   `);
 
   db.run(`
-    CREATE TABLE IF NOT EXISTS messages ( 
-      id TEXT NOT NULL, 
-      conversation_id TEXT NOT NULL, 
-      in_reply_to TEXT, 
-      timestamp INTEGER,
-      direction TEXT NOT NULL CHECK (direction IN ('in', 'out')), 
-      type TEXT NOT NULL DEFAULT 'message' CHECK (type IN ('message', 'edit', 'delete', 'receipt')), 
-      sender TEXT NOT NULL, 
-      recipient TEXT NOT NULL, 
-      delivered_to TEXT NOT NULL, 
-      subject TEXT, 
-      body TEXT, 
-      content_type TEXT NOT NULL DEFAULT 'text' CHECK (content_type IN ('text', 'markdown', 'html', 'forward')), 
-      expires_at INTEGER, 
-      server_signature TEXT NOT NULL, 
-      server_key_id TEXT NOT NULL, 
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()), 
-      UNIQUE (id, direction, delivered_to)
-    )
-  `);
-
-  db.run(`
-    CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)
-  `);
-
-  db.run(`
-    CREATE INDEX IF NOT EXISTS idx_messages_in_reply_to ON messages(in_reply_to)
-  `);
-
-  db.run(`
-    CREATE INDEX IF NOT EXISTS idx_messages_delivered_to ON messages(delivered_to)
-  `);
-
-  db.run(`
-    CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient)
-  `);
-
-  db.run(`
     CREATE TABLE IF NOT EXISTS key_cache ( 
       domain TEXT NOT NULL, 
       key_id TEXT NOT NULL, 

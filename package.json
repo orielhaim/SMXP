@@ -14,10 +14,10 @@
     "lint": "biome check . --write",
     "start": "bun src/main.js",
     "cli": "bun scripts/cli.js",
-    "node1": "PORT=3001 DB=./data/node1.db bun src/main.js",
-    "node2": "PORT=3002 DB=./data/node2.db bun src/main.js",
-    "send1to2": "PORT=3001 DB=./data/node1.db bun src/main.js send bob@test1.orielhaim.com alice@test2.orielhaim.com \"Hello from node1!\"",
-    "send2to1": "PORT=3002 DB=./data/node2.db bun src/main.js send alice@test2.orielhaim.com bob@test1.orielhaim.com \"Hello from node2!\""
+    "node1": "PORT=3001 DB=./data/node1.db MESSAGES_DB=./data/node1-messages.db bun src/main.js",
+    "node2": "PORT=3002 DB=./data/node2.db MESSAGES_DB=./data/node2-messages.db bun src/main.js",
+    "send1to2": "PORT=3001 DB=./data/node1.db MESSAGES_DB=./data/node1-messages.db bun src/main.js send bob@test1.orielhaim.com alice@test2.orielhaim.com \"Hello from node1!\"",
+    "send2to1": "PORT=3002 DB=./data/node2.db MESSAGES_DB=./data/node2-messages.db bun src/main.js send alice@test2.orielhaim.com bob@test1.orielhaim.com \"Hello from node2!\""
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.14",

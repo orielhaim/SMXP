@@ -9,7 +9,7 @@ import {
 import { smxpFetch } from "../shared/fetch.js";
 import { getInboxAddressByAddress } from "../store/addresses.js";
 import { domainExists, getDomainKeys } from "../store/domains.js";
-import { messageExists, storeMessage } from "../store/messages.js";
+import { messageExists, storeMessage } from "../store/messages-provider.js";
 import { matchRoutes } from "../store/routes.js";
 import { eventBus } from "./eventbus.js";
 
@@ -32,9 +32,9 @@ function flattenForward(envelope) {
   }
 }
 
-function storeInboxDelivery(envelope, deliveredTo) {
+async function storeInboxDelivery(envelope, deliveredTo) {
   const msgForStorage = normalizeEnvelopeForStorage(envelope);
-  storeMessage(msgForStorage, "in", deliveredTo);
+  await storeMessage(msgForStorage, "in", deliveredTo);
   eventBus.publish(deliveredTo, msgForStorage);
 }
 
@@ -77,7 +77,7 @@ async function deliverRouteTarget(envelope, sourceAddress, targetAddress) {
       throw new Error(`route target "${target.address}" is not an inbox`);
     }
 
-    storeInboxDelivery(envelope, target.address);
+    await storeInboxDelivery(envelope, target.address);
     return { local: target.address };
   }
 
@@ -110,7 +110,7 @@ export async function deliverEnvelope(envelope, verifySender) {
     return jsonResponse({ error: "recipient domain not on this server" }, 404);
   }
 
-  if (messageExists(envelope.id)) {
+  if (await messageExists(envelope.id)) {
     return jsonResponse({ error: "duplicate message" }, 409);
   }
 
@@ -127,7 +127,7 @@ export async function deliverEnvelope(envelope, verifySender) {
     const routes = matchRoutes(to.domain, to.localPart);
 
     if (inbox) {
-      storeInboxDelivery(envelope, to.address);
+      await storeInboxDelivery(envelope, to.address);
       deliveredTo.push(to.address);
 
       for (const route of routes) {

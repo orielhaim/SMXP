@@ -1,25 +1,15 @@
 import { Elysia } from "elysia";
 import { getAddress } from "../../store/addresses.js";
-import { getDb } from "../../store/db.js";
+import { queryMessages } from "../../store/messages-provider.js";
 import { withAuth } from "../auth.js";
 import { eventBus } from "../eventbus.js";
 
-function getMessagesSince(address, lastEventId) {
-  const db = getDb();
-  const anchor = db
-    .query(
-      `SELECT created_at FROM messages WHERE id = ? AND (delivered_to = ? OR sender = ?)`,
-    )
-    .get(lastEventId, address, address);
-  if (!anchor) return [];
-
-  return db
-    .query(
-      `SELECT * FROM messages
-       WHERE (delivered_to = ? OR sender = ?) AND created_at > ?
-       ORDER BY created_at ASC`,
-    )
-    .all(address, address, anchor.created_at);
+async function getMessagesSince(address, lastEventId) {
+  const result = await queryMessages(address, {
+    since_id: lastEventId,
+    limit: 100,
+  });
+  return result.messages;
 }
 
 export function streamRoutes() {
@@ -49,11 +39,14 @@ export function streamRoutes() {
           );
 
         const stream = new ReadableStream({
-          start(controller) {
+          async start(controller) {
             // Replay missed messages since last seen event ID
             const lastEventId = request.headers.get("last-event-id");
             if (lastEventId) {
-              for (const msg of getMessagesSince(targetAddress, lastEventId)) {
+              for (const msg of await getMessagesSince(
+                targetAddress,
+                lastEventId,
+              )) {
                 controller.enqueue(
                   sseFrame(msg.id, msg.type ?? "message", msg),
                 );

@@ -1,20 +1,18 @@
 import { Elysia, t } from "elysia";
 import { v4 as uuidv4 } from "uuid";
-import {
-  buildPaginatedResponse,
-  clampLimit,
-  decodeCursor,
-} from "../../shared/cursor.js";
-import { getDb } from "../../store/db.js";
+import { queryMessages } from "../../store/messages-provider.js";
 import { maybeRefreshToken, withAuth } from "../auth.js";
 
-const PaginationQuery = t.Object({
-  limit: t.Optional(
-    t.String({ description: "Max results (1-100, default 20)" }),
-  ),
-  after: t.Optional(t.String({ description: "Cursor for next page" })),
-  before: t.Optional(t.String({ description: "Cursor for previous page" })),
-});
+const PaginationQuery = t.Object(
+  {
+    limit: t.Optional(
+      t.String({ description: "Max results (1-100, default 20)" }),
+    ),
+    after: t.Optional(t.String({ description: "Cursor for next page" })),
+    before: t.Optional(t.String({ description: "Cursor for previous page" })),
+  },
+  { additionalProperties: true },
+);
 
 const MessageType = t.Union([
   t.Literal("message"),
@@ -28,6 +26,12 @@ const ContentType = t.Union([
   t.Literal("markdown"),
   t.Literal("html"),
   t.Literal("forward"),
+]);
+
+const EditContentType = t.Union([
+  t.Literal("text"),
+  t.Literal("markdown"),
+  t.Literal("html"),
 ]);
 
 function getOriginalEnvelope(row) {
@@ -52,65 +56,24 @@ function getOriginalEnvelope(row) {
   };
 }
 
-function queryMessages(
-  direction,
-  addressField,
-  address,
-  { limit, after, before },
-) {
-  const db = getDb();
-  const safeLimit = clampLimit(limit);
-
-  let sql;
-  let params;
-
-  if (after) {
-    const c = decodeCursor(after);
-    sql = `SELECT * FROM messages
-           WHERE direction = ? AND ${addressField} = ?
-             AND (created_at < ? OR (created_at = ? AND id < ?))
-           ORDER BY created_at DESC, id DESC LIMIT ?`;
-    params = [direction, address, c.timestamp, c.timestamp, c.id, safeLimit];
-  } else if (before) {
-    const c = decodeCursor(before);
-    sql = `SELECT * FROM messages
-           WHERE direction = ? AND ${addressField} = ?
-             AND (created_at > ? OR (created_at = ? AND id > ?))
-           ORDER BY created_at ASC, id ASC LIMIT ?`;
-    params = [direction, address, c.timestamp, c.timestamp, c.id, safeLimit];
-  } else {
-    sql = `SELECT * FROM messages
-           WHERE direction = ? AND ${addressField} = ?
-           ORDER BY created_at DESC, id DESC LIMIT ?`;
-    params = [direction, address, safeLimit];
-  }
-
-  const rows = db.query(sql).all(...params);
-  if (before) rows.reverse();
-  return { rows, limit: safeLimit };
-}
-
 export function mailRoutes() {
   return new Elysia({ prefix: "/.smxp/mail" })
     .use(withAuth())
 
     .get(
       "/inbox",
-      ({ authInfo, query, set }) => {
+      async ({ authInfo, query, set }) => {
         if (!authInfo) {
           set.status = 401;
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const { rows, limit } = queryMessages(
-          "in",
-          "delivered_to",
-          address,
-          query,
-        );
-        const { cursors } = buildPaginatedResponse(rows, limit);
+        const result = await queryMessages(address, {
+          ...query,
+          direction: "in",
+        });
         maybeRefreshToken(set.headers, authInfo);
-        return { messages: rows, cursors };
+        return result;
       },
       {
         query: PaginationQuery,
@@ -120,16 +83,18 @@ export function mailRoutes() {
 
     .get(
       "/sent",
-      ({ authInfo, query, set }) => {
+      async ({ authInfo, query, set }) => {
         if (!authInfo) {
           set.status = 401;
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const { rows, limit } = queryMessages("out", "sender", address, query);
-        const { cursors } = buildPaginatedResponse(rows, limit);
+        const result = await queryMessages(address, {
+          ...query,
+          direction: "out",
+        });
         maybeRefreshToken(set.headers, authInfo);
-        return { messages: rows, cursors };
+        return result;
       },
       {
         query: PaginationQuery,
@@ -139,17 +104,14 @@ export function mailRoutes() {
 
     .get(
       "/messages/:id",
-      ({ authInfo, params, set }) => {
+      async ({ authInfo, params, set }) => {
         if (!authInfo) {
           set.status = 401;
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const row = getDb()
-          .query(
-            `SELECT * FROM messages WHERE id = ? AND (delivered_to = ? OR sender = ?)`,
-          )
-          .get(params.id, address, address);
+        const result = await queryMessages(address, { id: params.id });
+        const row = result.messages[0];
 
         if (!row) {
           set.status = 404;
@@ -166,36 +128,21 @@ export function mailRoutes() {
 
     .get(
       "/threads/:id",
-      ({ authInfo, params, set }) => {
+      async ({ authInfo, params, set }) => {
         if (!authInfo) {
           set.status = 401;
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const db = getDb();
+        const result = await queryMessages(address, { thread: params.id });
 
-        const root = db
-          .query(
-            `SELECT conversation_id FROM messages
-             WHERE id = ? AND (delivered_to = ? OR sender = ?)`,
-          )
-          .get(params.id, address, address);
-
-        if (!root) {
+        if (result.messages.length === 0) {
           set.status = 404;
           return { error: "thread not found" };
         }
 
-        const messages = db
-          .query(
-            `SELECT * FROM messages
-             WHERE (delivered_to = ? OR sender = ?) AND conversation_id = ?
-             ORDER BY created_at ASC`,
-          )
-          .all(address, address, root.conversation_id);
-
         maybeRefreshToken(set.headers, authInfo);
-        return { messages };
+        return result;
       },
       {
         params: t.Object({
@@ -280,11 +227,8 @@ export function mailRoutes() {
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const row = getDb()
-          .query(
-            `SELECT * FROM messages WHERE id = ? AND (delivered_to = ? OR sender = ?)`,
-          )
-          .get(params.id, address, address);
+        const result = await queryMessages(address, { id: params.id });
+        const row = result.messages[0];
 
         if (!row) {
           set.status = 404;
@@ -344,13 +288,11 @@ export function mailRoutes() {
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const db = getDb();
-        const row = db
-          .query(
-            `SELECT id, conversation_id FROM messages
-             WHERE id = ? AND sender = ? AND direction = 'out'`,
-          )
-          .get(params.id, address);
+        const result = await queryMessages(address, {
+          id: params.id,
+          direction: "out",
+        });
+        const row = result.messages[0];
 
         if (!row) {
           set.status = 404;
@@ -398,7 +340,7 @@ export function mailRoutes() {
           ]),
           subject: t.Optional(t.String()),
           body: t.Optional(t.String()),
-          content_type: t.Optional(ContentType),
+          content_type: t.Optional(EditContentType),
           from: t.Optional(t.String({ minLength: 1 })),
         }),
         detail: { tags: ["Mail"], summary: "Edit a sent message" },

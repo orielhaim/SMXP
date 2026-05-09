@@ -7,28 +7,30 @@ import { createDomain, getDomainDnsRecord } from "../src/store/domains.js";
 import { createRoute } from "../src/store/routes.js";
 import { initSchema } from "../src/store/schema.js";
 
-function init(domain, dbPath) {
+function init(dbPath, domain) {
   config.dbPath = dbPath;
   initSchema();
   createDomain(domain);
 }
 
-async function resolveDomain(args) {
+async function resolveDb(args) {
+  const defaultValue = process.env.DB || "./data/smxp.db";
   return (
-    args.domain ||
-    (await consola.prompt("Domain name:", {
+    args.db ||
+    (await consola.prompt(`Database path (${defaultValue}):`, {
       type: "text",
-      default: "localhost",
+      default: defaultValue,
     }))
   );
 }
 
-async function resolveDb(args) {
+async function resolveDomain(args) {
+  const defaultValue = process.env.DOMAIN || "localhost";
   return (
-    args.db ||
-    (await consola.prompt("Database path:", {
+    args.domain ||
+    (await consola.prompt(`Domain name (${defaultValue}):`, {
       type: "text",
-      default: "./data/smxp.db",
+      default: defaultValue,
     }))
   );
 }
@@ -39,13 +41,13 @@ const setup = defineCommand({
     description: "Generate server keys and initialize domain",
   },
   args: {
-    domain: { type: "string", description: "Domain name", alias: ["d"] },
     db: { type: "string", description: "Database path", valueHint: "path" },
+    domain: { type: "string", description: "Domain name", alias: ["d"] },
   },
   async run({ args }) {
-    const domain = await resolveDomain(args);
     const dbPath = await resolveDb(args);
-    init(domain, dbPath);
+    const domain = await resolveDomain(args);
+    init(dbPath, domain);
 
     const domainKeys = createDomain(domain);
     const dnsRecord = getDomainDnsRecord(domain);
@@ -58,8 +60,8 @@ const setup = defineCommand({
 const inbox = defineCommand({
   meta: { name: "inbox", description: "Create an inbox alias" },
   args: {
-    domain: { type: "string", description: "Domain name", alias: ["d"] },
     db: { type: "string", description: "Database path", valueHint: "path" },
+    domain: { type: "string", description: "Domain name", alias: ["d"] },
     name: {
       type: "string",
       description: "Alias name (e.g. alice)",
@@ -68,8 +70,8 @@ const inbox = defineCommand({
     password: { type: "string", description: "Alias password", alias: ["p"] },
   },
   async run({ args }) {
-    const domain = await resolveDomain(args);
     const dbPath = await resolveDb(args);
+    const domain = await resolveDomain(args);
     const name =
       args.name ||
       (await consola.prompt("Alias name (e.g. alice):", { type: "text" }));
@@ -82,10 +84,9 @@ const inbox = defineCommand({
       process.exit(1);
     }
 
-    init(domain, dbPath);
+    init(dbPath, domain);
 
     const hashed = await hashPassword(password);
-
     createInboxAddress(domain, name, hashed);
 
     consola.success(`Inbox "${name}@${domain}" created.`);
@@ -95,8 +96,8 @@ const inbox = defineCommand({
 const forward = defineCommand({
   meta: { name: "forward", description: "Create a forward alias" },
   args: {
-    domain: { type: "string", description: "Domain name", alias: ["d"] },
     db: { type: "string", description: "Database path", valueHint: "path" },
+    domain: { type: "string", description: "Domain name", alias: ["d"] },
     name: {
       type: "string",
       description: 'Alias name (e.g. sales or "*")',
@@ -109,8 +110,8 @@ const forward = defineCommand({
     },
   },
   async run({ args }) {
-    const domain = await resolveDomain(args);
     const dbPath = await resolveDb(args);
+    const domain = await resolveDomain(args);
     const name =
       args.name ||
       (await consola.prompt('Alias name (e.g. sales or "*"):', {
@@ -127,7 +128,7 @@ const forward = defineCommand({
       process.exit(1);
     }
 
-    init(domain, dbPath);
+    init(dbPath, domain);
     createRoute({
       domain,
       pattern: name,
