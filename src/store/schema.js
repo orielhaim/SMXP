@@ -4,15 +4,12 @@ export function initSchema() {
   const db = getDb();
 
   db.run(`
-    CREATE TABLE IF NOT EXISTS server_config (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )
-  `);
-
-  db.run(`
     CREATE TABLE IF NOT EXISTS domains (
       domain TEXT PRIMARY KEY,
+      public_key TEXT,
+      secret_key TEXT,
+      key_id TEXT,
+      algorithm TEXT NOT NULL DEFAULT 'ML-DSA-65',
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     )
   `);
@@ -32,19 +29,6 @@ export function initSchema() {
         (mode = 'forward' AND forward_to IS NOT NULL AND password_hash IS NULL) 
       ), 
       CHECK (alias != '*' OR mode = 'forward')
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS signing_keys ( 
-      key_id TEXT PRIMARY KEY, 
-      domain TEXT NOT NULL, 
-      alias TEXT NOT NULL, 
-      algorithm TEXT NOT NULL DEFAULT 'ML-DSA-65', 
-      public_key TEXT NOT NULL, 
-      secret_key TEXT NOT NULL, 
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()), 
-      FOREIGN KEY (domain, alias) REFERENCES addresses (domain, alias) ON DELETE CASCADE
     )
   `);
 
@@ -92,15 +76,14 @@ export function initSchema() {
       direction TEXT NOT NULL CHECK (direction IN ('in', 'out')), 
       type TEXT NOT NULL DEFAULT 'message' CHECK (type IN ('message', 'edit', 'delete', 'receipt')), 
       sender TEXT NOT NULL, 
-      on_behalf_of TEXT, 
       recipient TEXT NOT NULL, 
       delivered_to TEXT NOT NULL, 
       subject TEXT, 
       body TEXT, 
       content_type TEXT NOT NULL DEFAULT 'text' CHECK (content_type IN ('text', 'markdown', 'html')), 
       expires_at INTEGER, 
-      signature TEXT NOT NULL, 
-      key_id TEXT NOT NULL, 
+      server_signature TEXT NOT NULL, 
+      server_key_id TEXT NOT NULL, 
       verified INTEGER NOT NULL DEFAULT 0, 
       created_at INTEGER NOT NULL DEFAULT (unixepoch()), 
       UNIQUE (id, direction, delivered_to)
@@ -132,7 +115,7 @@ export function initSchema() {
       source TEXT NOT NULL DEFAULT 'wellknown' CHECK (source IN ('wellknown', 'header', 'manual')), 
       fetched_at INTEGER NOT NULL DEFAULT (unixepoch()), 
       ttl INTEGER NOT NULL DEFAULT 3600, 
-      PRIMARY KEY (domain, key_id)
+      PRIMARY KEY (domain)
     )
   `);
 

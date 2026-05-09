@@ -1,19 +1,12 @@
 import { defineCommand, runMain } from "citty";
 import { consola } from "consola";
 import config from "../src/config.js";
-import {
-  fingerprintPublicKey,
-  generateKeyPair,
-  serializePublicKey,
-  serializeSecretKey,
-} from "../src/crypto/keys.js";
 import { hashPassword } from "../src/crypto/password.js";
 import {
   createForwardAddress,
   createInboxAddress,
 } from "../src/store/addresses.js";
-import { getDb } from "../src/store/db.js";
-import { createDomain } from "../src/store/domains.js";
+import { createDomain, getDomainDnsRecord } from "../src/store/domains.js";
 import { initSchema } from "../src/store/schema.js";
 
 function init(domain, dbPath) {
@@ -56,37 +49,11 @@ const setup = defineCommand({
     const dbPath = await resolveDb(args);
     init(domain, dbPath);
 
-    const db = getDb();
-    const existing = db
-      .query(`SELECT value FROM server_config WHERE key = 'server_public_key'`)
-      .get();
-
-    if (existing) {
-      consola.info("Server keys already exist. Skipping.");
-      return;
-    }
-
-    consola.start("Generating server keys...");
-    const keys = generateKeyPair();
-
-    for (const [k, v] of Object.entries({
-      server_public_key: serializePublicKey(keys.publicKey),
-      server_secret_key: serializeSecretKey(keys.secretKey),
-      server_key_id: keys.keyId,
-      server_algorithm: keys.algorithm,
-    })) {
-      db.run(
-        `INSERT OR REPLACE INTO server_config (key, value) VALUES (?, ?)`,
-        [k, v],
-      );
-    }
-
-    const fp = fingerprintPublicKey(keys.publicKey);
-    consola.success(`Key ID: ${keys.keyId}`);
-    consola.success(`Fingerprint: ${fp}`);
-    consola.box(
-      `DNS TXT record for _smxpkey.${domain}:\n\nv=SMXP1; k=${keys.algorithm}; kid=${keys.keyId}; fp=sha256:${fp}`,
-    );
+    const domainKeys = createDomain(domain);
+    const dnsRecord = getDomainDnsRecord(domain);
+    consola.success(`Key ID: ${domainKeys.key_id}`);
+    consola.success(`Fingerprint: ${dnsRecord.fingerprint}`);
+    consola.box(`DNS TXT record for ${dnsRecord.name}:\n\n${dnsRecord.value}`);
   },
 });
 
@@ -119,21 +86,11 @@ const inbox = defineCommand({
 
     init(domain, dbPath);
 
-    const keys = generateKeyPair();
     const hashed = await hashPassword(password);
 
-    createInboxAddress(
-      domain,
-      name,
-      hashed,
-      serializePublicKey(keys.publicKey),
-      serializeSecretKey(keys.secretKey),
-      keys.keyId,
-      keys.algorithm,
-    );
+    createInboxAddress(domain, name, hashed);
 
     consola.success(`Inbox "${name}@${domain}" created.`);
-    consola.info(`Alias key ID: ${keys.keyId}`);
   },
 });
 

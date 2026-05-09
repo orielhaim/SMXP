@@ -1,11 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { Elysia, t } from "elysia";
 import config from "../config.js";
-import {
-  generateKeyPair,
-  serializePublicKey,
-  serializeSecretKey,
-} from "../crypto/keys.js";
 import { hashPassword } from "../crypto/password.js";
 import { discoverSmxp } from "../dns/discover.js";
 import { parseAddress } from "../shared/address.js";
@@ -22,8 +17,8 @@ import {
   deleteDomain,
   domainExists,
   getAllDomains,
+  getDomainDnsRecord,
 } from "../store/domains.js";
-import { getServerDnsRecord } from "../store/server-config.js";
 import { fetchDnsFingerprint } from "./verification.js";
 
 function normalizeDomain(domain) {
@@ -77,7 +72,7 @@ function domainPayload(domain) {
   return {
     domain,
     dns: {
-      key: getServerDnsRecord(domain),
+      key: getDomainDnsRecord(domain),
       service: serviceDnsRecord(domain),
     },
   };
@@ -159,7 +154,7 @@ export function adminRoutes() {
             return { error: "domain not found" };
           }
 
-          const expected = getServerDnsRecord(domain);
+          const expected = getDomainDnsRecord(domain);
           const actual = await fetchDnsFingerprint(domain).catch(() => null);
           const verified = actual === expected.fingerprint;
           const service = await discoverSmxp(domain).catch((err) => ({
@@ -253,16 +248,10 @@ export function adminRoutes() {
               set.status = 400;
               return { error: "wildcard addresses can only be forwards" };
             }
-            const keys = generateKeyPair();
-            const publicKey = serializePublicKey(keys.publicKey);
             createInboxAddress(
               domain,
               alias,
               await hashPassword(body.password ?? ""),
-              publicKey,
-              serializeSecretKey(keys.secretKey),
-              keys.keyId,
-              keys.algorithm,
             );
             set.status = 201;
             return {
@@ -270,9 +259,6 @@ export function adminRoutes() {
               domain,
               alias,
               mode,
-              public_key: publicKey,
-              key_id: keys.keyId,
-              algorithm: keys.algorithm,
             };
           }
 
@@ -358,7 +344,7 @@ export function adminRoutes() {
             set.status = 404;
             return { error: "address not found" };
           }
-          const { password_hash, secret_key, ...safe } = row;
+          const { password_hash, ...safe } = row;
           return { address: safe };
         } catch (err) {
           set.status = 400;

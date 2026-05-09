@@ -195,6 +195,7 @@ export function mailRoutes() {
 
         const { sendMessage } = await import("../../client/send.js");
         const address = `${authInfo.alias}@${authInfo.domain}`;
+        const from = body.from ?? address;
         const recipients = Array.isArray(body.to) ? body.to : [body.to];
 
         try {
@@ -202,7 +203,7 @@ export function mailRoutes() {
           for (const to of recipients) {
             const conversation_id = body.conversation_id ?? uuidv4();
             const result = await sendMessage({
-              from: address,
+              from,
               to,
               subject: body.subject ?? "",
               body: body.body ?? "",
@@ -210,7 +211,7 @@ export function mailRoutes() {
               conversation_id,
               in_reply_to: body.in_reply_to ?? null,
               content_type: body.content_type ?? "text",
-              on_behalf_of: body.on_behalf_of ?? null,
+              delegator: address,
             });
             results.push({
               status: "sent",
@@ -229,6 +230,7 @@ export function mailRoutes() {
       },
       {
         body: t.Object({
+          from: t.Optional(t.String({ minLength: 1 })),
           to: t.Union([
             t.String({ minLength: 1 }),
             t.Array(t.String({ minLength: 1 })),
@@ -239,7 +241,6 @@ export function mailRoutes() {
           conversation_id: t.Optional(t.String()),
           in_reply_to: t.Optional(t.String()),
           content_type: t.Optional(ContentType),
-          on_behalf_of: t.Optional(t.String()),
         }),
         detail: {
           tags: ["Mail"],
@@ -300,13 +301,14 @@ export function mailRoutes() {
         }
 
         const { sendMessage } = await import("../../client/send.js");
+        const from = body.from ?? address;
         const recipients = Array.isArray(body.to) ? body.to : [body.to];
 
         try {
           const results = [];
           for (const to of recipients) {
             const result = await sendMessage({
-              from: address,
+              from,
               to,
               subject: body.subject ?? "",
               body: body.body ?? "",
@@ -314,7 +316,7 @@ export function mailRoutes() {
               conversation_id: row.conversation_id,
               in_reply_to: params.id,
               content_type: body.content_type ?? "text",
-              on_behalf_of: body.on_behalf_of ?? null,
+              delegator: address,
             });
             results.push({
               status: "edited",
@@ -340,7 +342,7 @@ export function mailRoutes() {
           subject: t.Optional(t.String()),
           body: t.Optional(t.String()),
           content_type: t.Optional(ContentType),
-          on_behalf_of: t.Optional(t.String()),
+          from: t.Optional(t.String({ minLength: 1 })),
         }),
         detail: { tags: ["Mail"], summary: "Edit a sent message" },
       },

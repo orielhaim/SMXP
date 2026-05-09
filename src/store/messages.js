@@ -14,43 +14,59 @@ export function storeMessage(
   deliveredTo = envelope.recipient,
 ) {
   const db = getDb();
+  const columns = new Set(
+    db
+      .query(`PRAGMA table_info(messages)`)
+      .all()
+      .map((column) => column.name),
+  );
+  const legacyColumns = columns.has("signature") && columns.has("key_id");
+  const insertColumns = [
+    "id",
+    "conversation_id",
+    "in_reply_to",
+    "direction",
+    "type",
+    "sender",
+    "recipient",
+    "delivered_to",
+    "subject",
+    "body",
+    "content_type",
+    "expires_at",
+    "server_signature",
+    "server_key_id",
+  ];
+  const values = [
+    envelope.id,
+    envelope.conversation_id,
+    envelope.in_reply_to ?? null,
+    direction,
+    envelope.type ?? "message",
+    envelope.sender,
+    envelope.recipient,
+    deliveredTo,
+    envelope.subject ?? null,
+    envelope.body ?? null,
+    envelope.content_type ?? "text",
+    envelope.expires ?? null,
+    envelope.server_signature,
+    envelope.server_key_id,
+  ];
+
+  if (legacyColumns) {
+    insertColumns.push("signature", "key_id");
+    values.push(envelope.server_signature, envelope.server_key_id);
+  }
+
+  insertColumns.push("verified");
+  values.push(verified);
+
+  const placeholders = insertColumns.map(() => "?").join(", ");
   db.run(
-    `INSERT OR IGNORE INTO messages (
-      id,
-      conversation_id,
-      in_reply_to,
-      direction,
-      type,
-      sender,
-      on_behalf_of,
-      recipient,
-      delivered_to,
-      subject,
-      body,
-      content_type,
-      expires_at,
-      signature,
-      key_id,
-      verified
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      envelope.id,
-      envelope.conversation_id,
-      envelope.in_reply_to ?? null,
-      direction,
-      envelope.type ?? "message",
-      envelope.sender,
-      envelope.on_behalf_of ?? null,
-      envelope.recipient,
-      deliveredTo,
-      envelope.subject ?? null,
-      envelope.body ?? null,
-      envelope.content_type ?? "text",
-      envelope.expires ?? null,
-      envelope.signature,
-      envelope.key_id,
-      verified,
-    ],
+    `INSERT OR IGNORE INTO messages (${insertColumns.join(", ")})
+     VALUES (${placeholders})`,
+    values,
   );
 }
 

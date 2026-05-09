@@ -2,15 +2,7 @@ import { formatAddress, parseAddress } from "../shared/address.js";
 import { getDb } from "./db.js";
 import { createDomain } from "./domains.js";
 
-export function createInboxAddress(
-  domain,
-  alias,
-  passwordHash,
-  publicKey,
-  secretKey,
-  keyId,
-  algorithm = "ML-DSA-65",
-) {
+export function createInboxAddress(domain, alias, passwordHash) {
   const db = getDb();
   const normalizedDomain = domain.trim().toLowerCase();
   const normalizedAlias = alias.trim().toLowerCase();
@@ -23,42 +15,16 @@ export function createInboxAddress(
   }
 
   createDomain(normalizedDomain);
-  db.run("BEGIN TRANSACTION");
-  try {
-    db.run(
-      `INSERT OR REPLACE INTO addresses (
-        domain,
-        alias,
-        mode,
-        forward_to,
-        password_hash
-      ) VALUES (?, ?, 'inbox', NULL, ?)`,
-      [normalizedDomain, normalizedAlias, passwordHash],
-    );
-
-    db.run(
-      `INSERT OR REPLACE INTO signing_keys (
-        key_id,
-        domain,
-        alias,
-        algorithm,
-        public_key,
-        secret_key
-      ) VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        keyId,
-        normalizedDomain,
-        normalizedAlias,
-        algorithm,
-        publicKey,
-        secretKey,
-      ],
-    );
-    db.run("COMMIT");
-  } catch (err) {
-    db.run("ROLLBACK");
-    throw err;
-  }
+  db.run(
+    `INSERT OR REPLACE INTO addresses (
+      domain,
+      alias,
+      mode,
+      forward_to,
+      password_hash
+    ) VALUES (?, ?, 'inbox', NULL, ?)`,
+    [normalizedDomain, normalizedAlias, passwordHash],
+  );
 }
 
 export function createForwardAddress(domain, alias, forwardToList) {
@@ -107,35 +73,18 @@ export function createForwardAddress(domain, alias, forwardToList) {
 
 export function getAddress(domain, alias) {
   const db = getDb();
-  const addr = db
+  return db
     .query(`SELECT * FROM addresses WHERE domain = ? AND alias = ?`)
     .get(domain.trim().toLowerCase(), alias.trim().toLowerCase());
-  if (!addr) return null;
-
-  if (addr.mode === "inbox") {
-    const key = db
-      .query(
-        `SELECT * FROM signing_keys WHERE domain = ? AND alias = ? LIMIT 1`,
-      )
-      .get(addr.domain, addr.alias);
-    if (key) {
-      addr.public_key = key.public_key;
-      addr.secret_key = key.secret_key;
-      addr.key_id = key.key_id;
-      addr.algorithm = key.algorithm;
-    }
-  }
-  return addr;
 }
 
 export function getAllAddresses() {
   const db = getDb();
   const addresses = db
     .query(
-      `SELECT a.domain, a.alias, a.mode, a.forward_to, a.created_at, k.public_key, k.key_id, k.algorithm
-       FROM addresses a
-       LEFT JOIN signing_keys k ON a.domain = k.domain AND a.alias = k.alias
-       ORDER BY a.domain, a.alias`,
+      `SELECT domain, alias, mode, forward_to, created_at
+       FROM addresses
+       ORDER BY domain, alias`,
     )
     .all();
   return addresses;
@@ -145,11 +94,10 @@ export function getAddressesForDomain(domain) {
   const db = getDb();
   const addresses = db
     .query(
-      `SELECT a.domain, a.alias, a.mode, a.forward_to, a.created_at, k.public_key, k.key_id, k.algorithm
-       FROM addresses a
-       LEFT JOIN signing_keys k ON a.domain = k.domain AND a.alias = k.alias
-       WHERE a.domain = ?
-       ORDER BY a.alias`,
+      `SELECT domain, alias, mode, forward_to, created_at
+       FROM addresses
+       WHERE domain = ?
+       ORDER BY alias`,
     )
     .all(domain.trim().toLowerCase());
   return addresses;

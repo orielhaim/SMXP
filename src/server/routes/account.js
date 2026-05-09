@@ -33,9 +33,6 @@ export function accountRoutes() {
           domain: address.domain,
           address: `${address.alias}@${address.domain}`,
           mode: address.mode,
-          public_key: address.public_key,
-          key_id: address.key_id,
-          algorithm: address.algorithm,
           created_at: address.created_at,
         };
       },
