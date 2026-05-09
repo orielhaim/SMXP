@@ -137,9 +137,9 @@ export function validateEnvelope(envelope) {
 
   if (
     envelope.content_type !== undefined &&
-    typeof envelope.content_type !== "string"
+    !["text", "markdown", "html", "forward"].includes(envelope.content_type)
   ) {
-    return "content_type must be a string";
+    return "unsupported content_type";
   }
 
   if (

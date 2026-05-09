@@ -18,18 +18,27 @@ export function initSchema() {
     CREATE TABLE IF NOT EXISTS addresses ( 
       domain TEXT NOT NULL REFERENCES domains(domain) ON DELETE CASCADE, 
       alias TEXT NOT NULL, 
-      mode TEXT NOT NULL CHECK (mode IN ('inbox', 'forward')), 
-      forward_to TEXT, 
       password_hash TEXT, 
       created_at INTEGER NOT NULL DEFAULT (unixepoch()), 
-      PRIMARY KEY (domain, alias), 
-      CHECK ( 
-        (mode = 'inbox' AND forward_to IS NULL AND password_hash IS NOT NULL) 
-        OR 
-        (mode = 'forward' AND forward_to IS NOT NULL AND password_hash IS NULL) 
-      ), 
-      CHECK (alias != '*' OR mode = 'forward')
+      PRIMARY KEY (domain, alias)
     )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS routes (
+      id TEXT PRIMARY KEY,
+      domain TEXT NOT NULL REFERENCES domains(domain) ON DELETE CASCADE,
+      pattern TEXT NOT NULL,
+      target_address TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    )
+  `);
+
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_routes_domain_enabled_priority
+    ON routes(domain, enabled, priority)
   `);
 
   db.run(`
@@ -73,6 +82,7 @@ export function initSchema() {
       id TEXT NOT NULL, 
       conversation_id TEXT NOT NULL, 
       in_reply_to TEXT, 
+      timestamp INTEGER,
       direction TEXT NOT NULL CHECK (direction IN ('in', 'out')), 
       type TEXT NOT NULL DEFAULT 'message' CHECK (type IN ('message', 'edit', 'delete', 'receipt')), 
       sender TEXT NOT NULL, 
@@ -80,11 +90,10 @@ export function initSchema() {
       delivered_to TEXT NOT NULL, 
       subject TEXT, 
       body TEXT, 
-      content_type TEXT NOT NULL DEFAULT 'text' CHECK (content_type IN ('text', 'markdown', 'html')), 
+      content_type TEXT NOT NULL DEFAULT 'text' CHECK (content_type IN ('text', 'markdown', 'html', 'forward')), 
       expires_at INTEGER, 
       server_signature TEXT NOT NULL, 
       server_key_id TEXT NOT NULL, 
-      verified INTEGER NOT NULL DEFAULT 0, 
       created_at INTEGER NOT NULL DEFAULT (unixepoch()), 
       UNIQUE (id, direction, delivered_to)
     )

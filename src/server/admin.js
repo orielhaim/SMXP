@@ -3,9 +3,7 @@ import { Elysia, t } from "elysia";
 import config from "../config.js";
 import { hashPassword } from "../crypto/password.js";
 import { discoverSmxp } from "../dns/discover.js";
-import { parseAddress } from "../shared/address.js";
 import {
-  createForwardAddress,
   createInboxAddress,
   deleteAddress,
   getAddress,
@@ -19,6 +17,13 @@ import {
   getAllDomains,
   getDomainDnsRecord,
 } from "../store/domains.js";
+import {
+  createRoute,
+  deleteRoute,
+  getRoute,
+  getRoutes,
+  updateRoute,
+} from "../store/routes.js";
 import { fetchDnsFingerprint } from "./verification.js";
 
 function normalizeDomain(domain) {
@@ -232,8 +237,6 @@ export function adminRoutes() {
         try {
           const domain = normalizeDomain(body.domain);
           const alias = normalizeAlias(body.alias);
-          const mode = body.mode ?? "inbox";
-
           if (!domainExists(domain)) {
             set.status = 404;
             return { error: "domain does not exist" };
@@ -243,71 +246,17 @@ export function adminRoutes() {
             return { error: "address already exists" };
           }
 
-          if (mode === "inbox") {
-            if (alias === "*") {
-              set.status = 400;
-              return { error: "wildcard addresses can only be forwards" };
-            }
-            createInboxAddress(
-              domain,
-              alias,
-              await hashPassword(body.password ?? ""),
-            );
-            set.status = 201;
-            return {
-              address: `${alias}@${domain}`,
-              domain,
-              alias,
-              mode,
-            };
-          }
-
-          // forward
-          if (!body.forward_to) {
-            set.status = 400;
-            return { error: "forward_to is required for forward addresses" };
-          }
-          const targets = Array.isArray(body.forward_to)
-            ? body.forward_to
-            : [body.forward_to];
-          if (targets.length === 0) {
-            set.status = 400;
-            return { error: "at least one forward target is required" };
-          }
-
-          const normalized = [];
-          for (const addr of targets) {
-            let parsed;
-            try {
-              parsed = parseAddress(addr);
-            } catch {
-              set.status = 400;
-              return { error: `invalid forward target "${addr}"` };
-            }
-            if (parsed.domain !== domain) {
-              set.status = 400;
-              return {
-                error: `forward target "${parsed.address}" must belong to the same domain`,
-              };
-            }
-            const target = getAddress(parsed.domain, parsed.localPart);
-            if (!target || target.mode !== "inbox") {
-              set.status = target ? 400 : 404;
-              return {
-                error: `forward target "${parsed.address}" must be an inbox address`,
-              };
-            }
-            normalized.push(parsed.address);
-          }
-
-          createForwardAddress(domain, alias, normalized);
+          createInboxAddress(
+            domain,
+            alias,
+            await hashPassword(body.password ?? ""),
+          );
           set.status = 201;
           return {
             address: `${alias}@${domain}`,
             domain,
             alias,
-            mode,
-            forward_to: normalized,
+            mode: "inbox",
           };
         } catch (err) {
           set.status = 400;
@@ -318,13 +267,9 @@ export function adminRoutes() {
         body: t.Object({
           domain: t.String({ minLength: 1 }),
           alias: t.String({ minLength: 1 }),
-          mode: t.Optional(t.Union([t.Literal("inbox"), t.Literal("forward")])),
           password: t.Optional(
             t.String({ description: "Required for inbox addresses" }),
           ),
-          forward_to: t.Optional(t.Union([t.String(), t.Array(t.String())]), {
-            description: "Required for forward addresses",
-          }),
         }),
         detail: {
           tags: ["Admin"],
@@ -379,6 +324,110 @@ export function adminRoutes() {
       {
         params: t.Object({ domain: t.String(), alias: t.String() }),
         detail: { tags: ["Admin"], summary: "Delete an address" },
+      },
+    )
+
+    .get(
+      "/routes/:domain",
+      ({ params, set }) => {
+        try {
+          const domain = normalizeDomain(params.domain);
+          if (!domainExists(domain)) {
+            set.status = 404;
+            return { error: "domain not found" };
+          }
+          return { routes: getRoutes(domain) };
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        params: t.Object({ domain: t.String() }),
+        detail: { tags: ["Admin"], summary: "List routing rules" },
+      },
+    )
+
+    .post(
+      "/routes",
+      ({ body, set }) => {
+        try {
+          const domain = normalizeDomain(body.domain);
+          if (!domainExists(domain)) {
+            set.status = 404;
+            return { error: "domain not found" };
+          }
+          const route = createRoute({
+            domain,
+            pattern: body.pattern,
+            targetAddress: body.target_address,
+            priority: body.priority ?? 0,
+            enabled: body.enabled ?? 1,
+          });
+          set.status = 201;
+          return { route };
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        body: t.Object({
+          domain: t.String({ minLength: 1 }),
+          pattern: t.String({ minLength: 1 }),
+          target_address: t.String({ minLength: 1 }),
+          priority: t.Optional(t.Number()),
+          enabled: t.Optional(t.Number()),
+        }),
+        detail: { tags: ["Admin"], summary: "Create a routing rule" },
+      },
+    )
+
+    .put(
+      "/routes/:id",
+      ({ params, body, set }) => {
+        try {
+          if (!getRoute(params.id)) {
+            set.status = 404;
+            return { error: "route not found" };
+          }
+          return {
+            route: updateRoute(params.id, {
+              pattern: body.pattern,
+              targetAddress: body.target_address,
+              priority: body.priority,
+              enabled: body.enabled,
+            }),
+          };
+        } catch (err) {
+          set.status = 400;
+          return { error: err.message };
+        }
+      },
+      {
+        params: t.Object({ id: t.String() }),
+        body: t.Object({
+          pattern: t.Optional(t.String({ minLength: 1 })),
+          target_address: t.Optional(t.String({ minLength: 1 })),
+          priority: t.Optional(t.Number()),
+          enabled: t.Optional(t.Number()),
+        }),
+        detail: { tags: ["Admin"], summary: "Update a routing rule" },
+      },
+    )
+
+    .delete(
+      "/routes/:id",
+      ({ params, set }) => {
+        if (!deleteRoute(params.id)) {
+          set.status = 404;
+          return { error: "route not found" };
+        }
+        return { status: "deleted", id: params.id };
+      },
+      {
+        params: t.Object({ id: t.String() }),
+        detail: { tags: ["Admin"], summary: "Delete a routing rule" },
       },
     );
 }

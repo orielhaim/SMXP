@@ -27,7 +27,30 @@ const ContentType = t.Union([
   t.Literal("text"),
   t.Literal("markdown"),
   t.Literal("html"),
+  t.Literal("forward"),
 ]);
+
+function getOriginalEnvelope(row) {
+  if (row.content_type === "forward") {
+    return JSON.parse(row.body);
+  }
+
+  return {
+    version: "SMXP/1.0",
+    id: row.id,
+    from: row.sender,
+    to: row.recipient,
+    timestamp: row.timestamp ?? row.created_at,
+    type: row.type,
+    conversation_id: row.conversation_id,
+    content_type: row.content_type,
+    subject: row.subject ?? undefined,
+    body: row.body ?? undefined,
+    in_reply_to: row.in_reply_to ?? undefined,
+    server_signature: row.server_signature ?? row.signature,
+    server_key_id: row.server_key_id ?? row.key_id,
+  };
+}
 
 function queryMessages(
   direction,
@@ -250,32 +273,66 @@ export function mailRoutes() {
     )
 
     .post(
-      "/messages/:id/read",
-      ({ authInfo, params, set }) => {
+      "/messages/:id/forward",
+      async ({ authInfo, params, body, set }) => {
         if (!authInfo) {
           set.status = 401;
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const db = getDb();
-        const row = db
-          .query(`SELECT id FROM messages WHERE id = ? AND delivered_to = ?`)
-          .get(params.id, address);
+        const row = getDb()
+          .query(
+            `SELECT * FROM messages WHERE id = ? AND (delivered_to = ? OR sender = ?)`,
+          )
+          .get(params.id, address, address);
 
         if (!row) {
           set.status = 404;
           return { error: "message not found" };
         }
-        db.run(
-          `UPDATE messages SET verified = 2 WHERE id = ? AND delivered_to = ?`,
-          [params.id, address],
-        );
-        maybeRefreshToken(set.headers, authInfo);
-        return { status: "read", id: params.id };
+
+        try {
+          const original = getOriginalEnvelope(row);
+          const recipients = Array.isArray(body.to) ? body.to : [body.to];
+          const { sendMessage } = await import("../../client/send.js");
+          const results = [];
+
+          for (const to of recipients) {
+            const result = await sendMessage({
+              from: address,
+              to,
+              subject: body.subject ?? row.subject ?? "",
+              body: JSON.stringify(original),
+              type: "message",
+              conversation_id: body.conversation_id ?? uuidv4(),
+              content_type: "forward",
+            });
+            results.push({
+              status: "forwarded",
+              to,
+              id: result?.envelope?.id ?? null,
+            });
+          }
+
+          maybeRefreshToken(set.headers, authInfo);
+          set.status = 201;
+          return { status: "forwarded", results };
+        } catch (err) {
+          set.status = 500;
+          return { error: err.message };
+        }
       },
       {
         params: t.Object({ id: t.String() }),
-        detail: { tags: ["Mail"], summary: "Mark a message as read" },
+        body: t.Object({
+          to: t.Union([
+            t.String({ minLength: 1 }),
+            t.Array(t.String({ minLength: 1 })),
+          ]),
+          subject: t.Optional(t.String()),
+          conversation_id: t.Optional(t.String()),
+        }),
+        detail: { tags: ["Mail"], summary: "Forward a message" },
       },
     )
 

@@ -10,7 +10,6 @@ function mapMessageRow(row) {
 export function storeMessage(
   envelope,
   direction,
-  verified = 0,
   deliveredTo = envelope.recipient,
 ) {
   const db = getDb();
@@ -25,6 +24,7 @@ export function storeMessage(
     "id",
     "conversation_id",
     "in_reply_to",
+    "timestamp",
     "direction",
     "type",
     "sender",
@@ -41,6 +41,7 @@ export function storeMessage(
     envelope.id,
     envelope.conversation_id,
     envelope.in_reply_to ?? null,
+    envelope.timestamp ?? null,
     direction,
     envelope.type ?? "message",
     envelope.sender,
@@ -58,9 +59,6 @@ export function storeMessage(
     insertColumns.push("signature", "key_id");
     values.push(envelope.server_signature, envelope.server_key_id);
   }
-
-  insertColumns.push("verified");
-  values.push(verified);
 
   const placeholders = insertColumns.map(() => "?").join(", ");
   db.run(

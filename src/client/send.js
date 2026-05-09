@@ -94,7 +94,7 @@ export async function sendMessage({
 
     const result = await response.json();
     const msgForStorage = normalizeEnvelopeForStorage(envelope);
-    storeMessage(msgForStorage, "out", 1, sender.address);
+    storeMessage(msgForStorage, "out", sender.address);
     eventBus.publish(sender.address, msgForStorage);
 
     console.log(`[SEND] Message ${envelope.id} delivered locally`);
@@ -114,7 +114,7 @@ export async function sendMessage({
   const result = await smxpFetch.post(url, { json: envelope }).json();
 
   const msgForStorage = normalizeEnvelopeForStorage(envelope);
-  storeMessage(msgForStorage, "out", 1, sender.address);
+  storeMessage(msgForStorage, "out", sender.address);
   eventBus.publish(sender.address, msgForStorage);
 
   console.log(`[SEND] Message ${envelope.id} delivered successfully`);

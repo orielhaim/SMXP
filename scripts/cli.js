@@ -2,11 +2,9 @@ import { defineCommand, runMain } from "citty";
 import { consola } from "consola";
 import config from "../src/config.js";
 import { hashPassword } from "../src/crypto/password.js";
-import {
-  createForwardAddress,
-  createInboxAddress,
-} from "../src/store/addresses.js";
+import { createInboxAddress } from "../src/store/addresses.js";
 import { createDomain, getDomainDnsRecord } from "../src/store/domains.js";
+import { createRoute } from "../src/store/routes.js";
 import { initSchema } from "../src/store/schema.js";
 
 function init(domain, dbPath) {
@@ -130,7 +128,11 @@ const forward = defineCommand({
     }
 
     init(domain, dbPath);
-    createForwardAddress(domain, name, target);
+    createRoute({
+      domain,
+      pattern: name,
+      targetAddress: target,
+    });
     consola.success(`Forward "${name}@${domain}" → ${target} created.`);
   },
 });
