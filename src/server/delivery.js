@@ -46,6 +46,35 @@ export async function storeIncoming(envelope, deliveredTo) {
   eventBus.publish(deliveredTo, toStore);
 }
 
+function publishReadStatusEvent(address, payload) {
+  eventBus.publish(address, {
+    id: `read:${payload.conversation_id}:${payload.up_to_timestamp}:${payload.reader}`,
+    type: "read_status",
+    ...payload,
+  });
+}
+
+function applyReceipt(envelope, prepared) {
+  const updated = messagesStore.applyReceipt(
+    prepared.to.address,
+    prepared.from.address,
+    envelope.conversation_id,
+    envelope.timestamp,
+  );
+
+  if (updated > 0) {
+    publishReadStatusEvent(prepared.to.address, {
+      conversation_id: envelope.conversation_id,
+      up_to_timestamp: envelope.timestamp,
+      read_status: 1,
+      reader: prepared.from.address,
+      updated,
+    });
+  }
+
+  return updated;
+}
+
 async function sendExternalForward(sourceAddress, targetAddress, envelope) {
   const source = parseAddress(sourceAddress);
   const target = parseAddress(targetAddress);
@@ -116,7 +145,10 @@ export async function prepareDelivery(envelope) {
     throw new DeliveryError(404, "recipient domain not on this server");
   }
 
-  if (await messagesStore.exists(envelope.id)) {
+  if (
+    envelope.type !== "receipt" &&
+    (await messagesStore.exists(envelope.id))
+  ) {
     throw new DeliveryError(409, "duplicate message");
   }
 
@@ -128,7 +160,21 @@ export async function prepareDelivery(envelope) {
 }
 
 export async function routeAndDeliver(envelope, prepared = null) {
-  const { to } = prepared ?? (await prepareDelivery(envelope));
+  const resolved = prepared ?? (await prepareDelivery(envelope));
+  const { to } = resolved;
+
+  if (envelope.type === "receipt") {
+    const updated = applyReceipt(envelope, resolved);
+    return {
+      status: "accepted",
+      id: envelope.id,
+      original_to: to.address,
+      delivered_to: [],
+      forwarded_to: [],
+      updated,
+    };
+  }
+
   const deliveredTo = [];
   const forwardedTo = [];
   const inbox = coreStore.addresses.getByAddress(to.address);

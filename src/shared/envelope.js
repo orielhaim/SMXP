@@ -63,6 +63,7 @@ export function createEnvelope({
   name,
   subject,
   body,
+  timestamp,
   expires,
   type = "message",
   conversation_id,
@@ -90,7 +91,10 @@ export function createEnvelope({
     if (err) throw new Error(err);
   }
 
-  const timestamp = Math.floor(Date.now() / 1000);
+  const envelopeTimestamp = timestamp ?? Math.floor(Date.now() / 1000);
+  if (!isValidTimestamp(envelopeTimestamp)) {
+    throw new Error("timestamp must be a non-negative integer");
+  }
   const normalizedName = isNonEmptyString(name) ? name.trim() : undefined;
   const normalizedSubject = subject || null;
   const normalizedBody = body || null;
@@ -102,7 +106,7 @@ export function createEnvelope({
     from,
     to,
     normalizedName || "",
-    timestamp,
+    envelopeTimestamp,
     type,
     expires ?? null,
     conversation_id,
@@ -121,7 +125,7 @@ export function createEnvelope({
     id,
     from,
     to,
-    timestamp,
+    timestamp: envelopeTimestamp,
     type,
     conversation_id,
     content_type,

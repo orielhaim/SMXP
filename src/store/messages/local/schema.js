@@ -14,6 +14,7 @@ export function applyMessagesSchema(db) {
       body TEXT,
       content_type TEXT NOT NULL DEFAULT 'text'
         CHECK (content_type IN ('text', 'markdown', 'html', 'forward')),
+      read_status INTEGER NOT NULL DEFAULT 0,
       expires_at INTEGER,
       server_signature TEXT NOT NULL,
       server_key_id TEXT NOT NULL,
@@ -22,12 +23,28 @@ export function applyMessagesSchema(db) {
     )
   `);
 
+  const hasReadStatus = db
+    .query(
+      `SELECT 1 FROM pragma_table_info('messages') WHERE name = 'read_status'`,
+    )
+    .get();
+  if (!hasReadStatus) {
+    db.run(
+      `ALTER TABLE messages ADD COLUMN read_status INTEGER NOT NULL DEFAULT 0`,
+    );
+  }
+
   db.run(
     `CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id)`,
   );
   db.run(`CREATE INDEX IF NOT EXISTS idx_msg_reply ON messages(in_reply_to)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_msg_to ON messages(delivered_to)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_msg_recipient ON messages(recipient)`);
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_msg_unread
+    ON messages(delivered_to, direction, read_status)
+    WHERE read_status = 0
+  `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS message_attachments (

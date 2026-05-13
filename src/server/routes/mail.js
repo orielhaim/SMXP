@@ -4,6 +4,7 @@ import config from "../../config.js";
 import { maybeRefreshToken, withAuth } from "../auth.js";
 import { sendMessage } from "../../client/send.js";
 import { blobsStore, messagesStore } from "../../store/index.js";
+import { eventBus } from "../eventbus.js";
 
 const PaginationQuery = t.Object(
   {
@@ -89,6 +90,31 @@ function getOriginalEnvelope(row) {
   };
 }
 
+function parseGroupedFlag(value) {
+  return value === "1" || value === "true";
+}
+
+function readStatusEvent(
+  address,
+  conversationId,
+  readStatus,
+  updated,
+  timestamp,
+) {
+  return {
+    id: `read:${conversationId}:${timestamp}:${address}:${readStatus}`,
+    type: "read_status",
+    conversation_id: conversationId,
+    read_status: readStatus,
+    updated,
+    timestamp,
+  };
+}
+
+function peerAddress(address, row) {
+  return row.sender === address ? row.recipient : row.sender;
+}
+
 export function mailRoutes() {
   return new Elysia({ prefix: "/.smxp/mail" })
     .use(withAuth())
@@ -132,6 +158,30 @@ export function mailRoutes() {
       {
         query: PaginationQuery,
         detail: { tags: ["Mail"], summary: "List sent messages" },
+      },
+    )
+
+    .get(
+      "/unread",
+      ({ authInfo, query, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+
+        const address = `${authInfo.alias}@${authInfo.domain}`;
+        const grouped = parseGroupedFlag(query.grouped);
+        const unread = messagesStore.unreadCount(address, grouped);
+        maybeRefreshToken(set.headers, authInfo);
+        if (grouped) {
+          const total = unread.reduce((sum, row) => sum + row.count, 0);
+          return { total, conversations: unread };
+        }
+        return { unread };
+      },
+      {
+        query: t.Object({ grouped: t.Optional(t.String()) }),
+        detail: { tags: ["Mail"], summary: "Get unread message counts" },
       },
     )
 
@@ -186,6 +236,108 @@ export function mailRoutes() {
         detail: {
           tags: ["Mail"],
           summary: "Get all messages in a thread by any message ID",
+        },
+      },
+    )
+
+    .post(
+      "/conversations/:id/read",
+      ({ authInfo, params, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+
+        const address = `${authInfo.alias}@${authInfo.domain}`;
+        const updated = messagesStore.markConversationRead(
+          address,
+          params.id,
+          1,
+        );
+        maybeRefreshToken(set.headers, authInfo);
+        return {
+          status: "read",
+          conversation_id: params.id,
+          updated,
+        };
+      },
+      {
+        params: t.Object({ id: t.String() }),
+        detail: {
+          tags: ["Mail"],
+          summary: "Mark a conversation as read locally",
+        },
+      },
+    )
+
+    .post(
+      "/conversations/:id/ack",
+      async ({ authInfo, params, set }) => {
+        if (!authInfo) {
+          set.status = 401;
+          return { error: "unauthorized" };
+        }
+
+        const address = `${authInfo.alias}@${authInfo.domain}`;
+        const meta = messagesStore.getConversationMeta(address, params.id);
+        if (!meta) {
+          set.status = 404;
+          return { error: "conversation not found" };
+        }
+
+        const to = peerAddress(address, meta);
+        if (!to || to === address) {
+          set.status = 400;
+          return { error: "conversation has no remote participant" };
+        }
+
+        try {
+          const receiptTimestamp =
+            meta.timestamp ?? Math.floor(Date.now() / 1000);
+          const result = await sendMessage({
+            from: address,
+            to,
+            body: "",
+            timestamp: receiptTimestamp,
+            type: "receipt",
+            conversation_id: params.id,
+            content_type: "text",
+            delegator: address,
+          });
+
+          const updated = messagesStore.markConversationRead(
+            address,
+            params.id,
+            2,
+          );
+          const event = readStatusEvent(
+            address,
+            params.id,
+            2,
+            updated,
+            receiptTimestamp,
+          );
+          eventBus.publish(address, event);
+
+          maybeRefreshToken(set.headers, authInfo);
+          set.status = 201;
+          return {
+            status: "acknowledged",
+            conversation_id: params.id,
+            to,
+            updated,
+            receipt_id: result?.envelope?.id ?? null,
+          };
+        } catch (err) {
+          set.status = 500;
+          return { error: err.message };
+        }
+      },
+      {
+        params: t.Object({ id: t.String() }),
+        detail: {
+          tags: ["Mail"],
+          summary: "Mark a conversation as read and send a receipt",
         },
       },
     )

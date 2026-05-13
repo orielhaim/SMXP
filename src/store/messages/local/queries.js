@@ -8,6 +8,7 @@ function mapRow(row, attachments) {
   return {
     ...row,
     expires: row.expires_at,
+    read_status: row.read_status,
     attachments: attachments || [],
   };
 }

@@ -29,5 +29,21 @@ export function createRemoteMessagesStore({ url, token = null }) {
         .post(endpoint(url, "/query"), { headers, json: { address, params } })
         .json();
     },
+
+    markConversationRead() {
+      throw new Error("remote messages store does not support read status");
+    },
+
+    applyReceipt() {
+      throw new Error("remote messages store does not support receipts");
+    },
+
+    getConversationMeta() {
+      throw new Error("remote messages store does not support read status");
+    },
+
+    unreadCount() {
+      throw new Error("remote messages store does not support read status");
+    },
   };
 }
