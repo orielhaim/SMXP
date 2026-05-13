@@ -1,11 +1,6 @@
 import { Elysia, t } from "elysia";
 import { verifyPassword } from "../../crypto/password.js";
-import { getAddress } from "../../store/addresses.js";
-import {
-  createToken,
-  deleteToken,
-  getTokensByAlias,
-} from "../../store/tokens.js";
+import { coreStore } from "../../store/index.js";
 import { withAuth } from "../auth.js";
 
 export function authRoutes() {
@@ -15,7 +10,7 @@ export function authRoutes() {
     .post(
       "/login",
       async ({ body, set }) => {
-        const row = getAddress(body.domain, body.alias);
+        const row = coreStore.addresses.get(body.domain, body.alias);
         if (!row?.password_hash) {
           set.status = 401;
           return { error: "invalid credentials" };
@@ -27,7 +22,7 @@ export function authRoutes() {
           return { error: "invalid credentials" };
         }
 
-        const { token, id } = createToken({
+        const { token, id } = coreStore.tokens.create({
           alias: body.alias,
           domain: body.domain,
           type: "session",
@@ -55,7 +50,7 @@ export function authRoutes() {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        deleteToken(authInfo.tokenId);
+        coreStore.tokens.delete(authInfo.tokenId);
         return { status: "logged_out" };
       },
       { detail: { tags: ["Auth"], summary: "Revoke current session token" } },
@@ -69,7 +64,7 @@ export function authRoutes() {
           return { error: "unauthorized" };
         }
 
-        const { token, id } = createToken({
+        const { token, id } = coreStore.tokens.create({
           alias: authInfo.alias,
           domain: authInfo.domain,
           type: "apikey",
@@ -102,7 +97,11 @@ export function authRoutes() {
           return { error: "unauthorized" };
         }
         return {
-          apikeys: getTokensByAlias(authInfo.alias, authInfo.domain, "apikey"),
+          apikeys: coreStore.tokens.byAlias(
+            authInfo.alias,
+            authInfo.domain,
+            "apikey",
+          ),
         };
       },
       {
@@ -120,7 +119,7 @@ export function authRoutes() {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (!deleteToken(params.id)) {
+        if (!coreStore.tokens.delete(params.id)) {
           set.status = 404;
           return { error: "api key not found" };
         }

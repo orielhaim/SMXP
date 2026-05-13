@@ -1,8 +1,6 @@
 import { Elysia, t } from "elysia";
 import { hashPassword, verifyPassword } from "../../crypto/password.js";
-import { getAddress } from "../../store/addresses.js";
-import { getDb } from "../../store/db.js";
-import { deleteToken, getTokensByAlias } from "../../store/tokens.js";
+import { coreStore } from "../../store/index.js";
 import { maybeRefreshToken, withAuth } from "../auth.js";
 
 function unauthorized() {
@@ -21,7 +19,10 @@ export function accountRoutes() {
           return unauthorized();
         }
 
-        const address = getAddress(authInfo.domain, authInfo.alias);
+        const address = coreStore.addresses.get(
+          authInfo.domain,
+          authInfo.alias,
+        );
         if (!address) {
           set.status = 404;
           return { error: "address not found" };
@@ -52,7 +53,10 @@ export function accountRoutes() {
           return unauthorized();
         }
 
-        const address = getAddress(authInfo.domain, authInfo.alias);
+        const address = coreStore.addresses.get(
+          authInfo.domain,
+          authInfo.alias,
+        );
         if (!address) {
           set.status = 404;
           return { error: "address not found" };
@@ -67,14 +71,10 @@ export function accountRoutes() {
           return { error: "current password is incorrect" };
         }
 
-        const db = getDb();
-        db.run(
-          `UPDATE addresses SET password_hash = ? WHERE alias = ? AND domain = ?`,
-          [
-            await hashPassword(body.new_password),
-            authInfo.alias,
-            authInfo.domain,
-          ],
+        coreStore.addresses.updatePassword(
+          authInfo.domain,
+          authInfo.alias,
+          await hashPassword(body.new_password),
         );
 
         maybeRefreshToken(set.headers, authInfo);
@@ -100,14 +100,12 @@ export function accountRoutes() {
           return unauthorized();
         }
 
-        const sessions = getTokensByAlias(
-          authInfo.alias,
-          authInfo.domain,
-          "session",
-        ).map((s) => ({
-          ...s,
-          current: s.id === authInfo.tokenId,
-        }));
+        const sessions = coreStore.tokens
+          .byAlias(authInfo.alias, authInfo.domain, "session")
+          .map((s) => ({
+            ...s,
+            current: s.id === authInfo.tokenId,
+          }));
 
         maybeRefreshToken(set.headers, authInfo);
         return { sessions };
@@ -128,19 +126,16 @@ export function accountRoutes() {
           return { error: "cannot revoke current session, use /auth/logout" };
         }
 
-        const db = getDb();
-        const row = db
-          .query(
-            `SELECT id FROM tokens WHERE id = ? AND alias = ? AND domain = ? AND type = 'session'`,
-          )
-          .get(params.id, authInfo.alias, authInfo.domain);
+        const row = coreStore.tokens
+          .byAlias(authInfo.alias, authInfo.domain, "session")
+          .find((session) => session.id === params.id);
 
         if (!row) {
           set.status = 404;
           return { error: "session not found" };
         }
 
-        deleteToken(params.id);
+        coreStore.tokens.delete(params.id);
         maybeRefreshToken(set.headers, authInfo);
         return { status: "revoked", id: params.id };
       },

@@ -3,27 +3,7 @@ import { Elysia, t } from "elysia";
 import config from "../config.js";
 import { hashPassword } from "../crypto/password.js";
 import { discoverSmxp } from "../dns/discover.js";
-import {
-  createInboxAddress,
-  deleteAddress,
-  getAddress,
-  getAddressesForDomain,
-  getAllAddresses,
-} from "../store/addresses.js";
-import {
-  createDomain,
-  deleteDomain,
-  domainExists,
-  getAllDomains,
-  getDomainDnsRecord,
-} from "../store/domains.js";
-import {
-  createRoute,
-  deleteRoute,
-  getRoute,
-  getRoutes,
-  updateRoute,
-} from "../store/routes.js";
+import { coreStore } from "../store/index.js";
 import { fetchDnsFingerprint } from "./verification.js";
 
 function normalizeDomain(domain) {
@@ -83,6 +63,8 @@ function domainPayload(domain) {
   };
 }
 
+const getDomainDnsRecord = (domain) => coreStore.domains.dnsRecord(domain);
+
 export function adminRoutes() {
   return new Elysia({ prefix: "/.smxp/admin" })
 
@@ -100,7 +82,7 @@ export function adminRoutes() {
     .get(
       "/domains",
       () => ({
-        domains: getAllDomains().map((d) => ({
+        domains: coreStore.domains.all().map((d) => ({
           ...d,
           ...domainPayload(d.domain),
         })),
@@ -113,7 +95,7 @@ export function adminRoutes() {
       ({ body, set }) => {
         try {
           const domain = normalizeDomain(body.domain);
-          createDomain(domain);
+          coreStore.domains.create(domain);
           set.status = 201;
           return domainPayload(domain);
         } catch (err) {
@@ -132,7 +114,9 @@ export function adminRoutes() {
       ({ params, set }) => {
         try {
           const domain = normalizeDomain(params.domain);
-          const existing = getAllDomains().find((r) => r.domain === domain);
+          const existing = coreStore.domains
+            .all()
+            .find((r) => r.domain === domain);
           if (!existing) {
             set.status = 404;
             return { error: "domain not found" };
@@ -154,7 +138,7 @@ export function adminRoutes() {
       async ({ params, set }) => {
         try {
           const domain = normalizeDomain(params.domain);
-          if (!domainExists(domain)) {
+          if (!coreStore.domains.exists(domain)) {
             set.status = 404;
             return { error: "domain not found" };
           }
@@ -190,7 +174,7 @@ export function adminRoutes() {
       ({ params, set }) => {
         try {
           const domain = normalizeDomain(params.domain);
-          if (!deleteDomain(domain)) {
+          if (!coreStore.domains.delete(domain)) {
             set.status = 404;
             return { error: "domain not found" };
           }
@@ -214,8 +198,8 @@ export function adminRoutes() {
       ({ query, set }) => {
         try {
           const addresses = query.domain
-            ? getAddressesForDomain(normalizeDomain(query.domain))
-            : getAllAddresses();
+            ? coreStore.addresses.byDomain(normalizeDomain(query.domain))
+            : coreStore.addresses.all();
           return { addresses };
         } catch (err) {
           set.status = 400;
@@ -237,16 +221,16 @@ export function adminRoutes() {
         try {
           const domain = normalizeDomain(body.domain);
           const alias = normalizeAlias(body.alias);
-          if (!domainExists(domain)) {
+          if (!coreStore.domains.exists(domain)) {
             set.status = 404;
             return { error: "domain does not exist" };
           }
-          if (getAddress(domain, alias)) {
+          if (coreStore.addresses.get(domain, alias)) {
             set.status = 409;
             return { error: "address already exists" };
           }
 
-          createInboxAddress(
+          coreStore.addresses.createInbox(
             domain,
             alias,
             await hashPassword(body.password ?? ""),
@@ -284,7 +268,7 @@ export function adminRoutes() {
         try {
           const domain = normalizeDomain(params.domain);
           const alias = normalizeAlias(params.alias);
-          const row = getAddress(domain, alias);
+          const row = coreStore.addresses.get(domain, alias);
           if (!row) {
             set.status = 404;
             return { error: "address not found" };
@@ -311,7 +295,7 @@ export function adminRoutes() {
         try {
           const domain = normalizeDomain(params.domain);
           const alias = normalizeAlias(params.alias);
-          if (!deleteAddress(domain, alias)) {
+          if (!coreStore.addresses.delete(domain, alias)) {
             set.status = 404;
             return { error: "address not found" };
           }
@@ -332,11 +316,11 @@ export function adminRoutes() {
       ({ params, set }) => {
         try {
           const domain = normalizeDomain(params.domain);
-          if (!domainExists(domain)) {
+          if (!coreStore.domains.exists(domain)) {
             set.status = 404;
             return { error: "domain not found" };
           }
-          return { routes: getRoutes(domain) };
+          return { routes: coreStore.routes.byDomain(domain) };
         } catch (err) {
           set.status = 400;
           return { error: err.message };
@@ -353,11 +337,11 @@ export function adminRoutes() {
       ({ body, set }) => {
         try {
           const domain = normalizeDomain(body.domain);
-          if (!domainExists(domain)) {
+          if (!coreStore.domains.exists(domain)) {
             set.status = 404;
             return { error: "domain not found" };
           }
-          const route = createRoute({
+          const route = coreStore.routes.create({
             domain,
             pattern: body.pattern,
             targetAddress: body.target_address,
@@ -387,12 +371,12 @@ export function adminRoutes() {
       "/routes/:id",
       ({ params, body, set }) => {
         try {
-          if (!getRoute(params.id)) {
+          if (!coreStore.routes.get(params.id)) {
             set.status = 404;
             return { error: "route not found" };
           }
           return {
-            route: updateRoute(params.id, {
+            route: coreStore.routes.update(params.id, {
               pattern: body.pattern,
               targetAddress: body.target_address,
               priority: body.priority,
@@ -419,7 +403,7 @@ export function adminRoutes() {
     .delete(
       "/routes/:id",
       ({ params, set }) => {
-        if (!deleteRoute(params.id)) {
+        if (!coreStore.routes.delete(params.id)) {
           set.status = 404;
           return { error: "route not found" };
         }

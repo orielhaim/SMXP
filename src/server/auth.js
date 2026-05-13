@@ -1,11 +1,6 @@
 import { Elysia } from "elysia";
-import {
-  createToken,
-  findTokenByHash,
-  hashToken,
-  SESSION_LIFETIME,
-  updateLastUsed,
-} from "../store/tokens.js";
+import { SESSION_LIFETIME } from "../store/core/tokens.js";
+import { coreStore } from "../store/index.js";
 
 export async function authenticate(request) {
   const auth = request.headers.get("authorization") ?? "";
@@ -15,12 +10,12 @@ export async function authenticate(request) {
     ? auth.slice(7)
     : url.searchParams.get("token");
   if (bearer) {
-    const row = findTokenByHash(hashToken(bearer));
+    const row = coreStore.tokens.findByHash(coreStore.tokens.hash(bearer));
     if (row) {
       if (row.expires_at && row.expires_at < Math.floor(Date.now() / 1000)) {
         return null;
       }
-      updateLastUsed(row.id);
+      coreStore.tokens.touch(row.id);
       return {
         alias: row.alias,
         domain: row.domain,
@@ -46,7 +41,7 @@ export function maybeRefreshToken(headers, authInfo) {
 
   const remaining = authInfo.expiresAt - Math.floor(Date.now() / 1000);
   if (remaining < SESSION_LIFETIME * 0.25) {
-    const { token } = createToken({
+    const { token } = coreStore.tokens.create({
       alias: authInfo.alias,
       domain: authInfo.domain,
       type: "session",

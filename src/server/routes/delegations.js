@@ -1,11 +1,6 @@
 import { Elysia, t } from "elysia";
 import { parseAddress } from "../../shared/address.js";
-import {
-  createDelegation,
-  deleteDelegation,
-  getDelegations,
-  getDelegationsGrantedTo,
-} from "../../store/delegations.js";
+import { coreStore } from "../../store/index.js";
 import { maybeRefreshToken, withAuth } from "../auth.js";
 
 export function delegationsRoutes() {
@@ -27,7 +22,7 @@ export function delegationsRoutes() {
           return { error: "invalid delegate address format" };
         }
 
-        const delegation = createDelegation({
+        const delegation = coreStore.delegations.create({
           domain: authInfo.domain,
           alias: authInfo.alias,
           delegate: body.delegate,
@@ -71,7 +66,12 @@ export function delegationsRoutes() {
           return { error: "unauthorized" };
         }
         maybeRefreshToken(set.headers, authInfo);
-        return { delegations: getDelegations(authInfo.domain, authInfo.alias) };
+        return {
+          delegations: coreStore.delegations.byOwner(
+            authInfo.domain,
+            authInfo.alias,
+          ),
+        };
       },
       {
         detail: {
@@ -90,7 +90,7 @@ export function delegationsRoutes() {
         }
         const myAddress = `${authInfo.alias}@${authInfo.domain}`;
         maybeRefreshToken(set.headers, authInfo);
-        return { delegations: getDelegationsGrantedTo(myAddress) };
+        return { delegations: coreStore.delegations.grantedTo(myAddress) };
       },
       {
         detail: {
@@ -107,7 +107,13 @@ export function delegationsRoutes() {
           set.status = 401;
           return { error: "unauthorized" };
         }
-        if (!deleteDelegation(authInfo.domain, authInfo.alias, params.id)) {
+        if (
+          !coreStore.delegations.delete(
+            authInfo.domain,
+            authInfo.alias,
+            params.id,
+          )
+        ) {
           set.status = 404;
           return { error: "delegation not found" };
         }

@@ -1,15 +1,14 @@
 import { sendMessage } from "../client/send.js";
 import { verifyObjectSignature } from "../crypto/verify.js";
 import { parseAddress } from "../shared/address.js";
-import { getDelegationByDelegate } from "../store/delegations.js";
-import { domainExists } from "../store/domains.js";
+import { coreStore } from "../store/index.js";
 import { getRemoteDomainKey } from "./verification.js";
 
-function jsonResponse(body, status) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
+export class DelegateSendError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
 }
 
 function assertValidDelegation(delegation, delegator, from) {
@@ -29,85 +28,76 @@ function assertValidDelegation(delegation, delegator, from) {
   }
 }
 
-export async function handleDelegateSend(request) {
-  let signedRequest;
+export async function processDelegateSend(signedRequest) {
+  const { server_signature, server_key_id, ...payload } = signedRequest;
+  let from;
+  let delegator;
   try {
-    signedRequest = await request.json();
-  } catch {
-    return jsonResponse({ error: "invalid JSON" }, 400);
-  }
-
-  try {
-    const { server_signature, server_key_id, ...payload } = signedRequest;
-    const from = parseAddress(payload.from);
-    const delegator = parseAddress(payload.delegator);
-
-    if (!domainExists(from.domain)) {
-      return jsonResponse({ error: "delegated sender domain not local" }, 404);
-    }
-
-    if (!server_signature || !server_key_id) {
-      return jsonResponse({ error: "missing signature" }, 400);
-    }
-
-    const now = Math.floor(Date.now() / 1000);
-    if (
-      !Number.isInteger(payload.timestamp) ||
-      Math.abs(now - payload.timestamp) > 300
-    ) {
-      return jsonResponse(
-        { error: "delegation request timestamp is invalid" },
-        400,
-      );
-    }
-
-    const delegatorKey = await getRemoteDomainKey(
-      delegator.domain,
-      server_key_id,
-    );
-    const signatureValid = verifyObjectSignature(
-      payload,
-      server_signature,
-      delegatorKey.public_key,
-    );
-
-    if (!signatureValid) {
-      return jsonResponse(
-        { error: "delegation request signature failed" },
-        403,
-      );
-    }
-
-    const delegation = getDelegationByDelegate(
-      from.domain,
-      from.localPart,
-      delegator.address,
-    );
-    assertValidDelegation(delegation, delegator.address, from.address);
-
-    const result = await sendMessage({
-      from: from.address,
-      to: payload.to,
-      name: payload.name,
-      subject: payload.subject,
-      body: payload.body,
-      expires: payload.expires,
-      type: payload.type,
-      conversation_id: payload.conversation_id,
-      in_reply_to: payload.in_reply_to,
-      content_type: payload.content_type,
-    });
-
-    return jsonResponse(
-      {
-        status: "accepted",
-        delegated_from: from.address,
-        delegator: delegator.address,
-        result,
-      },
-      201,
-    );
+    from = parseAddress(payload.from);
+    delegator = parseAddress(payload.delegator);
   } catch (err) {
-    return jsonResponse({ error: err.message }, 403);
+    throw new DelegateSendError(400, err.message);
   }
+
+  if (!coreStore.domains.exists(from.domain)) {
+    throw new DelegateSendError(404, "delegated sender domain not local");
+  }
+
+  if (!server_signature || !server_key_id) {
+    throw new DelegateSendError(400, "missing signature");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (
+    !Number.isInteger(payload.timestamp) ||
+    Math.abs(now - payload.timestamp) > 300
+  ) {
+    throw new DelegateSendError(400, "delegation request timestamp is invalid");
+  }
+
+  const delegatorKey = await getRemoteDomainKey(
+    delegator.domain,
+    server_key_id,
+  );
+  const signatureValid = verifyObjectSignature(
+    payload,
+    server_signature,
+    delegatorKey.public_key,
+  );
+
+  if (!signatureValid) {
+    throw new DelegateSendError(403, "delegation request signature failed");
+  }
+
+  const delegation = coreStore.delegations.forDelegate(
+    from.domain,
+    from.localPart,
+    delegator.address,
+  );
+
+  try {
+    assertValidDelegation(delegation, delegator.address, from.address);
+  } catch (err) {
+    throw new DelegateSendError(403, err.message);
+  }
+
+  const result = await sendMessage({
+    from: from.address,
+    to: payload.to,
+    name: payload.name,
+    subject: payload.subject,
+    body: payload.body,
+    expires: payload.expires,
+    type: payload.type,
+    conversation_id: payload.conversation_id,
+    in_reply_to: payload.in_reply_to,
+    content_type: payload.content_type,
+  });
+
+  return {
+    status: "accepted",
+    delegated_from: from.address,
+    delegator: delegator.address,
+    result,
+  };
 }

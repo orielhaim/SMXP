@@ -1,10 +1,9 @@
 import { Elysia, t } from "elysia";
 import { v4 as uuidv4 } from "uuid";
-import { queryMessages } from "../../store/messages-provider.js";
+import config from "../../config.js";
 import { maybeRefreshToken, withAuth } from "../auth.js";
 import { sendMessage } from "../../client/send.js";
-import { blobsStore } from "../../store/blobs-provider.js";
-import { config } from "../../config.js";
+import { blobsStore, messagesStore } from "../../store/index.js";
 
 const PaginationQuery = t.Object(
   {
@@ -102,7 +101,7 @@ export function mailRoutes() {
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const result = await queryMessages(address, {
+        const result = await messagesStore.query(address, {
           ...query,
           direction: "in",
         });
@@ -123,7 +122,7 @@ export function mailRoutes() {
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const result = await queryMessages(address, {
+        const result = await messagesStore.query(address, {
           ...query,
           direction: "out",
         });
@@ -144,7 +143,7 @@ export function mailRoutes() {
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const result = await queryMessages(address, { id: params.id });
+        const result = await messagesStore.query(address, { id: params.id });
         const row = result.messages[0];
 
         if (!row) {
@@ -168,7 +167,9 @@ export function mailRoutes() {
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const result = await queryMessages(address, { thread: params.id });
+        const result = await messagesStore.query(address, {
+          thread: params.id,
+        });
 
         if (result.messages.length === 0) {
           set.status = 404;
@@ -205,7 +206,7 @@ export function mailRoutes() {
           // build attachment refs for the envelope
           let attachmentRefs = [];
           if (Array.isArray(body.attachments) && body.attachments.length > 0) {
-            const blobs = blobsStore();
+            const blobs = blobsStore;
             const owner = address;
             attachmentRefs = body.attachments.map((a) => {
               const meta = blobs.getMeta(a.blob_id);
@@ -235,7 +236,7 @@ export function mailRoutes() {
 
             // issue per-recipient download tokens for each attachment
             const perRecipientAtts = attachmentRefs.map((ref) => {
-              const { token } = blobsStore().issueToken(ref.blob_id, {
+              const { token } = blobsStore.issueToken(ref.blob_id, {
                 recipient: to,
               });
               return {
@@ -303,7 +304,7 @@ export function mailRoutes() {
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const result = await queryMessages(address, { id: params.id });
+        const result = await messagesStore.query(address, { id: params.id });
         const row = result.messages[0];
 
         if (!row) {
@@ -363,7 +364,7 @@ export function mailRoutes() {
           return { error: "unauthorized" };
         }
         const address = `${authInfo.alias}@${authInfo.domain}`;
-        const result = await queryMessages(address, {
+        const result = await messagesStore.query(address, {
           id: params.id,
           direction: "out",
         });

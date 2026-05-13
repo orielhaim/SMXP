@@ -1,18 +1,14 @@
 import { signObject } from "../crypto/sign.js";
-import { discoverSmxp } from "../dns/discover.js";
-import { deliverEnvelope } from "../server/delivery.js";
+import { resolveEndpoint } from "../dns/resolve-endpoint.js";
+import { DeliveryError, routeAndDeliver } from "../server/delivery.js";
 import { eventBus } from "../server/eventbus.js";
-import { verifyLocalSender } from "../server/verification.js";
 import { parseAddress } from "../shared/address.js";
 import {
   createEnvelope,
   normalizeEnvelopeForStorage,
 } from "../shared/envelope.js";
 import { smxpFetch } from "../shared/fetch.js";
-import { getInboxAddressByAddress } from "../store/addresses.js";
-import { domainExists, getDomainKeys } from "../store/domains.js";
-import { storeMessage } from "../store/messages-provider.js";
-import { buildBaseUrl, resolveTarget } from "./resolve.js";
+import { coreStore, messagesStore } from "../store/index.js";
 
 export async function sendMessage({
   from,
@@ -30,8 +26,8 @@ export async function sendMessage({
   const sender = parseAddress(from);
   const recipient = parseAddress(to);
   const delegateAddress = delegator ? parseAddress(delegator) : sender;
-  const senderIsLocal = domainExists(sender.domain);
-  const address = getInboxAddressByAddress(
+  const senderIsLocal = coreStore.domains.exists(sender.domain);
+  const address = coreStore.addresses.getByAddress(
     senderIsLocal ? sender.address : delegateAddress.address,
   );
 
@@ -61,7 +57,7 @@ export async function sendMessage({
     });
   }
 
-  const domainKeys = getDomainKeys(sender.domain);
+  const domainKeys = coreStore.domains.keys(sender.domain);
   if (!domainKeys) {
     throw new Error(`Domain "${sender.domain}" is not configured`);
   }
@@ -81,40 +77,33 @@ export async function sendMessage({
     serverKeyId: domainKeys.key_id,
   });
 
-  if (domainExists(recipient.domain)) {
+  if (coreStore.domains.exists(recipient.domain)) {
     console.log(`[SEND] Local delivery to ${recipient.address}`);
-    const response = await deliverEnvelope(envelope, (message) =>
-      verifyLocalSender(message, address),
-    );
-
-    if (!response.ok) {
-      const errBody = await response.text();
-      throw new Error(`Local delivery failed: ${response.status} ${errBody}`);
+    let result;
+    try {
+      result = await routeAndDeliver(envelope);
+    } catch (err) {
+      if (err instanceof DeliveryError) {
+        throw new Error(`Local delivery failed: ${err.status} ${err.message}`);
+      }
+      throw err;
     }
-
-    const result = await response.json();
     const msgForStorage = normalizeEnvelopeForStorage(envelope);
-    await storeMessage(msgForStorage, "out", sender.address);
+    await messagesStore.store(msgForStorage, "out", sender.address);
     eventBus.publish(sender.address, msgForStorage);
 
     console.log(`[SEND] Message ${envelope.id} delivered locally`);
     return { envelope, result };
   }
 
-  const target = await discoverSmxp(recipient.domain);
-
-  const resolved = resolveTarget(recipient.domain);
-  const baseUrl = resolved
-    ? buildBaseUrl(resolved.host, resolved.port)
-    : buildBaseUrl(target.host, target.port);
-
-  const url = `${baseUrl}/.smxp/receive`;
+  const endpoint = await resolveEndpoint(recipient.domain);
+  const url = `${endpoint.baseUrl}/.smxp/receive`;
   console.log(`[SEND] Delivering to ${url}`);
 
   const result = await smxpFetch.post(url, { json: envelope }).json();
 
   const msgForStorage = normalizeEnvelopeForStorage(envelope);
-  await storeMessage(msgForStorage, "out", sender.address);
+  await messagesStore.store(msgForStorage, "out", sender.address);
   eventBus.publish(sender.address, msgForStorage);
 
   console.log(`[SEND] Message ${envelope.id} delivered successfully`);
@@ -123,7 +112,7 @@ export async function sendMessage({
 
 async function sendDelegationRequest(payload) {
   const delegator = parseAddress(payload.delegator);
-  const domainKeys = getDomainKeys(delegator.domain);
+  const domainKeys = coreStore.domains.keys(delegator.domain);
 
   if (!domainKeys) {
     throw new Error(`Domain "${delegator.domain}" is not configured`);
@@ -138,13 +127,8 @@ async function sendDelegationRequest(payload) {
     server_signature: signObject(requestPayload, domainKeys.secret_key),
     server_key_id: domainKeys.key_id,
   };
-  const target = await discoverSmxp(parseAddress(payload.from).domain);
-  const resolved = resolveTarget(parseAddress(payload.from).domain);
-  const baseUrl = resolved
-    ? buildBaseUrl(resolved.host, resolved.port)
-    : buildBaseUrl(target.host, target.port);
-
-  const url = `${baseUrl}/.smxp/delegate-send`;
+  const endpoint = await resolveEndpoint(parseAddress(payload.from).domain);
+  const url = `${endpoint.baseUrl}/.smxp/delegate-send`;
   console.log(`[SEND] Requesting delegated send via ${url}`);
 
   const result = await smxpFetch.post(url, { json: signedRequest }).json();

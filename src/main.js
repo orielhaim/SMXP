@@ -1,5 +1,6 @@
+import config from "./config.js";
 import { startServer } from "./server/index.js";
-import { initSchema } from "./store/schema.js";
+import { init } from "./store/index.js";
 
-initSchema();
+init(config);
 startServer();

@@ -1,5 +1,4 @@
-import { buildBaseUrl, resolveTarget } from "../client/resolve.js";
-import { discoverSmxp } from "../dns/discover.js";
+import { resolveEndpoint } from "../dns/resolve-endpoint.js";
 import { parseAddress } from "../shared/address.js";
 import {
   createEnvelope,
@@ -7,20 +6,14 @@ import {
   validateEnvelope,
 } from "../shared/envelope.js";
 import { smxpFetch } from "../shared/fetch.js";
-import { getInboxAddressByAddress } from "../store/addresses.js";
-import { domainExists, getDomainKeys } from "../store/domains.js";
-import { messagesStore } from "../store/index.js";
-import { matchRoutes } from "../store/routes.js";
+import { coreStore, messagesStore } from "../store/index.js";
 import { eventBus } from "./eventbus.js";
 
-const storeMessage = (...args) => messagesStore().store(...args);
-const messageExists = (...args) => messagesStore().exists(...args);
-
-function jsonResponse(body, status) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
+export class DeliveryError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
 }
 
 function flattenForward(envelope) {
@@ -35,7 +28,7 @@ function flattenForward(envelope) {
   }
 }
 
-async function storeInboxDelivery(envelope, deliveredTo) {
+export async function storeIncoming(envelope, deliveredTo) {
   let toStore = normalizeEnvelopeForStorage(envelope);
 
   if (toStore.content_type === "forward" && toStore.body) {
@@ -49,14 +42,14 @@ async function storeInboxDelivery(envelope, deliveredTo) {
     }
   }
 
-  await storeMessage(toStore, "in", deliveredTo);
+  await messagesStore.store(toStore, "in", deliveredTo);
   eventBus.publish(deliveredTo, toStore);
 }
 
 async function sendExternalForward(sourceAddress, targetAddress, envelope) {
   const source = parseAddress(sourceAddress);
   const target = parseAddress(targetAddress);
-  const domainKeys = getDomainKeys(source.domain);
+  const domainKeys = coreStore.domains.keys(source.domain);
 
   if (!domainKeys) {
     throw new Error(`Domain "${source.domain}" is not configured`);
@@ -74,10 +67,8 @@ async function sendExternalForward(sourceAddress, targetAddress, envelope) {
     serverKeyId: domainKeys.key_id,
   });
 
-  const resolved = resolveTarget(target.domain);
-  const targetServer = resolved || (await discoverSmxp(target.domain));
-  const baseUrl = buildBaseUrl(targetServer.host, targetServer.port);
-  const url = `${baseUrl}/.smxp/receive`;
+  const endpoint = await resolveEndpoint(target.domain);
+  const url = `${endpoint.baseUrl}/.smxp/receive`;
   await smxpFetch.post(url, { json: forwardedEnvelope }).json();
 
   return target.address;
@@ -86,13 +77,13 @@ async function sendExternalForward(sourceAddress, targetAddress, envelope) {
 async function deliverRouteTarget(envelope, sourceAddress, targetAddress) {
   const target = parseAddress(targetAddress);
 
-  if (domainExists(target.domain)) {
-    const targetInbox = getInboxAddressByAddress(target.address);
+  if (coreStore.domains.exists(target.domain)) {
+    const targetInbox = coreStore.addresses.getByAddress(target.address);
     if (!targetInbox) {
       throw new Error(`route target "${target.address}" is not an inbox`);
     }
 
-    await storeInboxDelivery(envelope, target.address);
+    await storeIncoming(envelope, target.address);
     return { local: target.address };
   }
 
@@ -105,11 +96,11 @@ async function deliverRouteTarget(envelope, sourceAddress, targetAddress) {
   };
 }
 
-export async function deliverEnvelope(envelope, verifySender) {
+export async function prepareDelivery(envelope) {
   const receivedAt = Math.floor(Date.now() / 1000);
   const validationError = validateEnvelope(envelope);
   if (validationError) {
-    return jsonResponse({ error: validationError }, 400);
+    throw new DeliveryError(400, validationError);
   }
 
   let to;
@@ -118,68 +109,64 @@ export async function deliverEnvelope(envelope, verifySender) {
     to = parseAddress(envelope.to);
     from = parseAddress(envelope.from);
   } catch (err) {
-    return jsonResponse({ error: err.message }, 400);
+    throw new DeliveryError(400, err.message);
   }
 
-  if (!domainExists(to.domain)) {
-    return jsonResponse({ error: "recipient domain not on this server" }, 404);
+  if (!coreStore.domains.exists(to.domain)) {
+    throw new DeliveryError(404, "recipient domain not on this server");
   }
 
-  if (await messageExists(envelope.id)) {
-    return jsonResponse({ error: "duplicate message" }, 409);
+  if (await messagesStore.exists(envelope.id)) {
+    throw new DeliveryError(409, "duplicate message");
   }
 
   if (typeof envelope.expires === "number" && receivedAt > envelope.expires) {
-    return jsonResponse({ error: "message expired" }, 410);
+    throw new DeliveryError(410, "message expired");
   }
 
-  try {
-    await verifySender(envelope, from);
+  return { to, from };
+}
 
-    const deliveredTo = [];
-    const forwardedTo = [];
-    const inbox = getInboxAddressByAddress(to.address);
-    const routes = matchRoutes(to.domain, to.localPart);
+export async function routeAndDeliver(envelope, prepared = null) {
+  const { to } = prepared ?? (await prepareDelivery(envelope));
+  const deliveredTo = [];
+  const forwardedTo = [];
+  const inbox = coreStore.addresses.getByAddress(to.address);
+  const routes = coreStore.routes.match(to.domain, to.localPart);
 
-    if (inbox) {
-      await storeInboxDelivery(envelope, to.address);
-      deliveredTo.push(to.address);
+  if (inbox) {
+    await storeIncoming(envelope, to.address);
+    deliveredTo.push(to.address);
 
-      for (const route of routes) {
-        const target = parseAddress(route.target_address);
-        if (!domainExists(target.domain)) {
-          forwardedTo.push(
-            await sendExternalForward(to.address, target.address, envelope),
-          );
-        }
-      }
-    } else {
-      if (routes.length === 0) {
-        return jsonResponse({ error: "recipient address not found" }, 404);
-      }
-
-      for (const route of routes) {
-        const result = await deliverRouteTarget(
-          envelope,
-          to.address,
-          route.target_address,
+    for (const route of routes) {
+      const target = parseAddress(route.target_address);
+      if (!coreStore.domains.exists(target.domain)) {
+        forwardedTo.push(
+          await sendExternalForward(to.address, target.address, envelope),
         );
-        if (result.local) deliveredTo.push(result.local);
-        if (result.external) forwardedTo.push(result.external);
       }
     }
+  } else {
+    if (routes.length === 0) {
+      throw new DeliveryError(404, "recipient address not found");
+    }
 
-    return jsonResponse(
-      {
-        status: "accepted",
-        id: envelope.id,
-        original_to: to.address,
-        delivered_to: deliveredTo,
-        forwarded_to: forwardedTo,
-      },
-      201,
-    );
-  } catch (err) {
-    return jsonResponse({ error: `verification error: ${err.message}` }, 403);
+    for (const route of routes) {
+      const result = await deliverRouteTarget(
+        envelope,
+        to.address,
+        route.target_address,
+      );
+      if (result.local) deliveredTo.push(result.local);
+      if (result.external) forwardedTo.push(result.external);
+    }
   }
+
+  return {
+    status: "accepted",
+    id: envelope.id,
+    original_to: to.address,
+    delivered_to: deliveredTo,
+    forwarded_to: forwardedTo,
+  };
 }

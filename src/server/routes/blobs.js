@@ -38,7 +38,7 @@ export function blobsRoutes() {
             return { error: "unauthorized" };
           }
           try {
-            const { blobId, chunkSize } = blobsStore().create({
+            const { blobId, chunkSize } = blobsStore.create({
               owner: ownerOf(authInfo),
               size: body.size,
               sha256: body.sha256,
@@ -72,7 +72,7 @@ export function blobsRoutes() {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          const meta = blobsStore().getMeta(params.id);
+          const meta = blobsStore.getMeta(params.id);
           if (!meta) {
             set.status = 404;
             return { error: "blob not found" };
@@ -85,7 +85,7 @@ export function blobsRoutes() {
           try {
             const offset = parseInt(query.offset ?? "0", 10);
             const bytes = await readRequestBytes(request);
-            const result = await blobsStore().appendChunk(
+            const result = await blobsStore.appendChunk(
               params.id,
               offset,
               bytes,
@@ -115,7 +115,7 @@ export function blobsRoutes() {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          const meta = blobsStore().getMeta(params.id);
+          const meta = blobsStore.getMeta(params.id);
           if (!meta) {
             set.status = 404;
             return { error: "blob not found" };
@@ -126,7 +126,7 @@ export function blobsRoutes() {
           }
 
           try {
-            const result = await blobsStore().finalize(params.id);
+            const result = await blobsStore.finalize(params.id);
             maybeRefreshToken(set.headers, authInfo);
             return result;
           } catch (err) {
@@ -144,20 +144,20 @@ export function blobsRoutes() {
       .get(
         "/:id",
         ({ params, query, headers, set }) => {
-          const { ok } = blobsStore().verifyToken(params.id, query.token);
+          const { ok } = blobsStore.verifyToken(params.id, query.token);
           if (!ok) {
             set.status = 401;
             return { error: "invalid token" };
           }
 
-          const meta = blobsStore().head(params.id);
+          const meta = blobsStore.head(params.id);
           if (!meta) {
             set.status = 404;
             return { error: "blob not found" };
           }
 
           const range = parseRange(headers.range, meta.size);
-          const opened = blobsStore().open(params.id, { range });
+          const opened = blobsStore.open(params.id, { range });
           if (!opened) {
             set.status = 416;
             return { error: "invalid range" };
@@ -196,12 +196,12 @@ export function blobsRoutes() {
       .head(
         "/:id",
         ({ params, query, set }) => {
-          const { ok } = blobsStore().verifyToken(params.id, query.token);
+          const { ok } = blobsStore.verifyToken(params.id, query.token);
           if (!ok) {
             set.status = 401;
             return new Response(null, { status: 401 });
           }
-          const meta = blobsStore().head(params.id);
+          const meta = blobsStore.head(params.id);
           if (!meta) return new Response(null, { status: 404 });
 
           return new Response(null, {
@@ -229,7 +229,7 @@ export function blobsRoutes() {
             return { error: "unauthorized" };
           }
           maybeRefreshToken(set.headers, authInfo);
-          return { blobs: blobsStore().listByOwner(ownerOf(authInfo)) };
+          return { blobs: blobsStore.listByOwner(ownerOf(authInfo)) };
         },
         { detail: { tags: ["Blobs"], summary: "List blobs owned by caller" } },
       )
@@ -242,7 +242,7 @@ export function blobsRoutes() {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          const ok = blobsStore().delete(params.id, ownerOf(authInfo));
+          const ok = blobsStore.delete(params.id, ownerOf(authInfo));
           if (!ok) {
             set.status = 404;
             return { error: "blob not found" };
@@ -267,7 +267,7 @@ export function blobsRoutes() {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          const meta = blobsStore().getMeta(params.id);
+          const meta = blobsStore.getMeta(params.id);
           if (!meta) {
             set.status = 404;
             return { error: "blob not found" };
@@ -277,7 +277,7 @@ export function blobsRoutes() {
             return { error: "not owner" };
           }
           try {
-            const result = blobsStore().issueToken(params.id, {
+            const result = blobsStore.issueToken(params.id, {
               recipient: body.recipient ?? null,
               expiresAt: body.expires_at ?? null,
             });
@@ -310,7 +310,7 @@ export function blobsRoutes() {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          const meta = blobsStore().getMeta(params.id);
+          const meta = blobsStore.getMeta(params.id);
           if (!meta) {
             set.status = 404;
             return { error: "blob not found" };
@@ -320,7 +320,7 @@ export function blobsRoutes() {
             return { error: "not owner" };
           }
           maybeRefreshToken(set.headers, authInfo);
-          return { tokens: blobsStore().listTokens(params.id) };
+          return { tokens: blobsStore.listTokens(params.id) };
         },
         {
           params: t.Object({ id: t.String() }),
@@ -336,12 +336,12 @@ export function blobsRoutes() {
             set.status = 401;
             return { error: "unauthorized" };
           }
-          const meta = blobsStore().getMeta(params.id);
+          const meta = blobsStore.getMeta(params.id);
           if (!meta || meta.owner !== ownerOf(authInfo)) {
             set.status = 404;
             return { error: "blob not found" };
           }
-          const ok = blobsStore().revokeToken(params.id, params.tokenId);
+          const ok = blobsStore.revokeToken(params.id, params.tokenId);
           if (!ok) {
             set.status = 404;
             return { error: "token not found" };

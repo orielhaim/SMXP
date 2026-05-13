@@ -1,15 +1,13 @@
-import { buildBaseUrl, resolveTarget } from "../client/resolve.js";
 import { fingerprintPublicKey } from "../crypto/keys.js";
 import { verifySignature } from "../crypto/verify.js";
-import { discoverSmxp } from "../dns/discover.js";
 import { dohQuery } from "../dns/doh.js";
+import { hasDevOverride, resolveEndpoint } from "../dns/resolve-endpoint.js";
 import { getSignableBytes } from "../shared/envelope.js";
 import { smxpFetch } from "../shared/fetch.js";
-import { getDomainKeys } from "../store/domains.js";
-import { cacheDomainKey, getCachedDomainKey } from "../store/key-cache.js";
+import { coreStore } from "../store/index.js";
 
 function shouldVerifyDnsFingerprint(domain) {
-  return domain !== "localhost" && !resolveTarget(domain);
+  return domain !== "localhost" && !hasDevOverride(domain);
 }
 
 export async function fetchDnsKeyRecord(domain) {
@@ -74,9 +72,8 @@ function verifyDnsKeyRecord(domain, keyInfo) {
 }
 
 export async function fetchServerPublicKey(domain) {
-  const resolved = resolveTarget(domain);
-  const target = resolved || (await discoverSmxp(domain));
-  const url = `${buildBaseUrl(target.host, target.port)}/.smxp/server-key/${encodeURIComponent(domain)}`;
+  const endpoint = await resolveEndpoint(domain);
+  const url = `${endpoint.baseUrl}/.smxp/server-key/${encodeURIComponent(domain)}`;
 
   const serverKeyInfo = await smxpFetch.get(url).json();
 
@@ -88,7 +85,7 @@ export async function fetchServerPublicKey(domain) {
 }
 
 export async function getRemoteDomainKey(domain, keyId) {
-  const cached = getCachedDomainKey(domain);
+  const cached = coreStore.keys.get(domain);
   if (cached && (!keyId || cached.key_id === keyId)) {
     return cached;
   }
@@ -100,7 +97,7 @@ export async function getRemoteDomainKey(domain, keyId) {
     );
   }
 
-  cacheDomainKey(
+  coreStore.keys.put(
     domain,
     keyInfo.public_key,
     keyInfo.key_id,
@@ -119,34 +116,6 @@ export async function verifyRemoteSender(envelope, senderDomain) {
     getSignableBytes(envelope),
     envelope.server_signature,
     serverKeyInfo.public_key,
-  );
-
-  if (!msgSigValid) {
-    throw new Error("message signature verification failed");
-  }
-}
-
-export async function verifyLocalSender(envelope, senderAlias) {
-  const domainKeys = getDomainKeys(senderAlias.domain);
-
-  if (!domainKeys) {
-    throw new Error(`domain "${senderAlias.domain}" is not configured`);
-  }
-
-  if (envelope.server_key_id !== domainKeys.key_id) {
-    throw new Error(
-      `Server key id mismatch! envelope: ${envelope.server_key_id}, local: ${domainKeys.key_id}`,
-    );
-  }
-
-  if (shouldVerifyDnsFingerprint(senderAlias.domain)) {
-    await verifyDnsKeyRecord(senderAlias.domain, domainKeys);
-  }
-
-  const msgSigValid = verifySignature(
-    getSignableBytes(envelope),
-    envelope.server_signature,
-    domainKeys.public_key,
   );
 
   if (!msgSigValid) {

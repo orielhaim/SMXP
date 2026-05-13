@@ -1,11 +1,10 @@
 import { Elysia } from "elysia";
-import { getAddress } from "../../store/addresses.js";
-import { queryMessages } from "../../store/messages-provider.js";
+import { coreStore, messagesStore } from "../../store/index.js";
 import { withAuth } from "../auth.js";
 import { eventBus } from "../eventbus.js";
 
 async function getMessagesSince(address, lastEventId) {
-  const result = await queryMessages(address, {
+  const result = await messagesStore.query(address, {
     since_id: lastEventId,
     limit: 100,
   });
@@ -24,7 +23,10 @@ export function streamRoutes() {
           return { error: "unauthorized" };
         }
 
-        const addrRow = getAddress(authInfo.domain, authInfo.alias);
+        const addrRow = coreStore.addresses.get(
+          authInfo.domain,
+          authInfo.alias,
+        );
         if (!addrRow || addrRow.mode !== "inbox") {
           set.status = 400;
           return { error: "SSE only available for inbox addresses" };

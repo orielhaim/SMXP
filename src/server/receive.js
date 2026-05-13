@@ -1,18 +1,17 @@
-import { deliverEnvelope } from "./delivery.js";
+import { DeliveryError, prepareDelivery, routeAndDeliver } from "./delivery.js";
 import { verifyRemoteSender } from "./verification.js";
 
-export async function handleReceive(req) {
-  let envelope;
+export async function processReceive(envelope) {
+  const prepared = await prepareDelivery(envelope);
   try {
-    envelope = await req.json();
-  } catch {
-    return new Response(JSON.stringify({ error: "invalid JSON" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    await verifyRemoteSender(
+      envelope,
+      prepared.from.domain,
+      prepared.from.localPart,
+    );
+  } catch (err) {
+    throw new DeliveryError(403, `verification error: ${err.message}`);
   }
 
-  return await deliverEnvelope(envelope, (message, sender) =>
-    verifyRemoteSender(message, sender.domain, sender.localPart),
-  );
+  return await routeAndDeliver(envelope, prepared);
 }
