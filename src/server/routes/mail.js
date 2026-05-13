@@ -2,6 +2,9 @@ import { Elysia, t } from "elysia";
 import { v4 as uuidv4 } from "uuid";
 import { queryMessages } from "../../store/messages-provider.js";
 import { maybeRefreshToken, withAuth } from "../auth.js";
+import { sendMessage } from "../../client/send.js";
+import { blobsStore } from "../../store/blobs-provider.js";
+import { config } from "../../config.js";
 
 const PaginationQuery = t.Object(
   {
@@ -33,6 +36,37 @@ const EditContentType = t.Union([
   t.Literal("markdown"),
   t.Literal("html"),
 ]);
+
+const AttachmentInput = t.Object({
+  blob_id: t.String(),
+  name: t.Optional(t.String()),
+  content_type: t.Optional(t.String()),
+  disposition: t.Optional(
+    t.Union([
+      t.Literal("attachment"),
+      t.Literal("inline"),
+      t.Literal("embedded"),
+    ]),
+  ),
+  encryption: t.Optional(
+    t.Object({
+      algorithm: t.String(),
+      key: t.String(),
+      nonce_prefix: t.String(),
+      chunk_size: t.Number(),
+      plaintext_size: t.Number(),
+      plaintext_sha256: t.Optional(t.String()),
+    }),
+  ),
+  thumbnail: t.Optional(
+    t.Object({
+      data: t.String(),
+      content_type: t.String(),
+      width: t.Optional(t.Number()),
+      height: t.Optional(t.Number()),
+    }),
+  ),
+});
 
 function getOriginalEnvelope(row) {
   if (row.content_type === "forward") {
@@ -163,15 +197,55 @@ export function mailRoutes() {
           return { error: "unauthorized" };
         }
 
-        const { sendMessage } = await import("../../client/send.js");
         const address = `${authInfo.alias}@${authInfo.domain}`;
         const from = body.from ?? address;
         const recipients = Array.isArray(body.to) ? body.to : [body.to];
 
         try {
+          // build attachment refs for the envelope
+          let attachmentRefs = [];
+          if (Array.isArray(body.attachments) && body.attachments.length > 0) {
+            const blobs = blobsStore();
+            const owner = address;
+            attachmentRefs = body.attachments.map((a) => {
+              const meta = blobs.getMeta(a.blob_id);
+              if (!meta) throw new Error(`blob ${a.blob_id} not found`);
+              if (meta.owner !== owner) {
+                throw new Error(`blob ${a.blob_id} not owned by ${owner}`);
+              }
+              if (meta.status !== "ready") {
+                throw new Error(`blob ${a.blob_id} not finalized`);
+              }
+              return {
+                blob_id: meta.blob_id,
+                sha256: meta.sha256,
+                size: meta.size,
+                content_type: a.content_type ?? meta.content_type,
+                name: a.name ?? meta.name,
+                disposition: a.disposition ?? "attachment",
+                encryption: a.encryption,
+                thumbnail: a.thumbnail,
+              };
+            });
+          }
+
           const results = [];
           for (const to of recipients) {
             const conversation_id = body.conversation_id ?? uuidv4();
+
+            // issue per-recipient download tokens for each attachment
+            const perRecipientAtts = attachmentRefs.map((ref) => {
+              const { token } = blobsStore().issueToken(ref.blob_id, {
+                recipient: to,
+              });
+              return {
+                ...ref,
+                host: authInfo.domain,
+                port: config.port,
+                download_token: token,
+              };
+            });
+
             const result = await sendMessage({
               from,
               to,
@@ -181,6 +255,7 @@ export function mailRoutes() {
               conversation_id,
               in_reply_to: body.in_reply_to ?? null,
               content_type: body.content_type ?? "text",
+              attachments: perRecipientAtts,
               delegator: address,
             });
             results.push({
@@ -211,6 +286,7 @@ export function mailRoutes() {
           conversation_id: t.Optional(t.String()),
           in_reply_to: t.Optional(t.String()),
           content_type: t.Optional(ContentType),
+          attachments: t.Optional(t.Array(AttachmentInput)),
         }),
         detail: {
           tags: ["Mail"],
@@ -238,7 +314,6 @@ export function mailRoutes() {
         try {
           const original = getOriginalEnvelope(row);
           const recipients = Array.isArray(body.to) ? body.to : [body.to];
-          const { sendMessage } = await import("../../client/send.js");
           const results = [];
 
           for (const to of recipients) {
@@ -299,7 +374,6 @@ export function mailRoutes() {
           return { error: "message not found" };
         }
 
-        const { sendMessage } = await import("../../client/send.js");
         const from = body.from ?? address;
         const recipients = Array.isArray(body.to) ? body.to : [body.to];
 

@@ -9,9 +9,12 @@ import {
 import { smxpFetch } from "../shared/fetch.js";
 import { getInboxAddressByAddress } from "../store/addresses.js";
 import { domainExists, getDomainKeys } from "../store/domains.js";
-import { messageExists, storeMessage } from "../store/messages-provider.js";
+import { messagesStore } from "../store/index.js";
 import { matchRoutes } from "../store/routes.js";
 import { eventBus } from "./eventbus.js";
+
+const storeMessage = (...args) => messagesStore().store(...args);
+const messageExists = (...args) => messagesStore().exists(...args);
 
 function jsonResponse(body, status) {
   return new Response(JSON.stringify(body), {
@@ -33,9 +36,21 @@ function flattenForward(envelope) {
 }
 
 async function storeInboxDelivery(envelope, deliveredTo) {
-  const msgForStorage = normalizeEnvelopeForStorage(envelope);
-  await storeMessage(msgForStorage, "in", deliveredTo);
-  eventBus.publish(deliveredTo, msgForStorage);
+  let toStore = normalizeEnvelopeForStorage(envelope);
+
+  if (toStore.content_type === "forward" && toStore.body) {
+    try {
+      const inner = JSON.parse(toStore.body);
+      if (Array.isArray(inner.attachments) && inner.attachments.length > 0) {
+        toStore = { ...toStore, attachments: inner.attachments };
+      }
+    } catch {
+      // ignore parse errors – fall back to storing the envelope as-is
+    }
+  }
+
+  await storeMessage(toStore, "in", deliveredTo);
+  eventBus.publish(deliveredTo, toStore);
 }
 
 async function sendExternalForward(sourceAddress, targetAddress, envelope) {

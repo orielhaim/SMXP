@@ -1,35 +1,39 @@
 import { openapi } from "@elysia/openapi";
 import { Elysia, t } from "elysia";
 import config from "../config.js";
-import { getAllDomains, getDomainKeys } from "../store/domains.js";
+import { coreStore, messagesStore, blobsStore } from "../store/index.js";
 import { adminRoutes } from "./admin.js";
 import { handleDelegateSend } from "./delegate-send.js";
 import { handleReceive } from "./receive.js";
 import { accountRoutes } from "./routes/account.js";
 import { authRoutes } from "./routes/auth.js";
+import { blobsRoutes } from "./routes/blobs.js";
 import { delegationsRoutes } from "./routes/delegations.js";
 import { mailRoutes } from "./routes/mail.js";
 import { streamRoutes } from "./routes/stream.js";
 
 function serverKeyHandler(domain) {
   const d = domain.trim().toLowerCase();
-  const domainKeys = getDomainKeys(d);
-
-  if (!domainKeys) {
+  const keys = coreStore().domains.keys(d);
+  if (!keys) {
     return new Response(JSON.stringify({ error: "domain not found" }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
-
   return {
-    public_key: domainKeys.public_key,
-    key_id: domainKeys.key_id,
-    algorithm: domainKeys.algorithm,
+    public_key: keys.public_key,
+    key_id: keys.key_id,
+    algorithm: keys.algorithm,
   };
 }
 
 export function createApp() {
+  // Warm-up: ensure stores are initialized
+  coreStore();
+  messagesStore();
+  blobsStore();
+
   return new Elysia()
     .use(
       openapi({
@@ -57,6 +61,7 @@ export function createApp() {
               description: "Grant and manage delegations",
             },
             { name: "Stream", description: "Real-time SSE message stream" },
+            { name: "Blobs", description: "Store and retrieve blobs" },
             {
               name: "Admin",
               description: "Server administration (requires admin secret)",
@@ -75,14 +80,10 @@ export function createApp() {
     .use(accountRoutes())
     .use(delegationsRoutes())
     .use(streamRoutes())
-
+    .use(blobsRoutes())
     .use(adminRoutes())
-
     .post("/.smxp/receive", ({ request }) => handleReceive(request), {
-      detail: {
-        tags: ["Protocol"],
-        summary: "Receive an inbound message envelope",
-      },
+      detail: { tags: ["Protocol"], summary: "Receive inbound envelope" },
     })
 
     .post(
@@ -112,7 +113,9 @@ export function createApp() {
       "/.smxp/health",
       () => ({
         status: "ok",
-        domains: getAllDomains().map((d) => d.domain),
+        domains: coreStore()
+          .domains.all()
+          .map((d) => d.domain),
         port: config.port,
       }),
       { detail: { tags: ["Protocol"], summary: "Health check" } },
@@ -121,8 +124,9 @@ export function createApp() {
 
 export function startServer() {
   const app = createApp().listen({ hostname: config.host, port: config.port });
-
-  const domains = getAllDomains().map((d) => d.domain);
+  const domains = coreStore()
+    .domains.all()
+    .map((d) => d.domain);
   const displayHost = config.host === "0.0.0.0" ? "localhost" : config.host;
 
   console.log(

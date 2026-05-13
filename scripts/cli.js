@@ -2,36 +2,19 @@ import { defineCommand, runMain } from "citty";
 import { consola } from "consola";
 import config from "../src/config.js";
 import { hashPassword } from "../src/crypto/password.js";
-import { createInboxAddress } from "../src/store/addresses.js";
-import { createDomain, getDomainDnsRecord } from "../src/store/domains.js";
-import { createRoute } from "../src/store/routes.js";
-import { initSchema } from "../src/store/schema.js";
+import { coreStore } from "../src/store/index.js";
 
 function init(dbPath, domain) {
-  config.dbPath = dbPath;
-  initSchema();
-  createDomain(domain);
+  config.core.path = dbPath;
+  const core = coreStore();
+  core.domains.create(domain);
+  return core;
 }
 
-async function resolveDb(args) {
-  const defaultValue = process.env.DB || "./data/smxp.db";
+async function ask(args, key, label, def) {
   return (
-    args.db ||
-    (await consola.prompt(`Database path (${defaultValue}):`, {
-      type: "text",
-      default: defaultValue,
-    }))
-  );
-}
-
-async function resolveDomain(args) {
-  const defaultValue = process.env.DOMAIN || "localhost";
-  return (
-    args.domain ||
-    (await consola.prompt(`Domain name (${defaultValue}):`, {
-      type: "text",
-      default: defaultValue,
-    }))
+    args[key] ||
+    (await consola.prompt(`${label} (${def}):`, { type: "text", default: def }))
   );
 }
 
@@ -41,110 +24,112 @@ const setup = defineCommand({
     description: "Generate server keys and initialize domain",
   },
   args: {
-    db: { type: "string", description: "Database path", valueHint: "path" },
+    db: { type: "string", description: "Database path" },
     domain: { type: "string", description: "Domain name", alias: ["d"] },
   },
   async run({ args }) {
-    const dbPath = await resolveDb(args);
-    const domain = await resolveDomain(args);
-    init(dbPath, domain);
-
-    const domainKeys = createDomain(domain);
-    const dnsRecord = getDomainDnsRecord(domain);
-    consola.success(`Key ID: ${domainKeys.key_id}`);
-    consola.success(`Fingerprint: ${dnsRecord.fingerprint}`);
-    consola.box(`DNS TXT record for ${dnsRecord.name}:\n\n${dnsRecord.value}`);
+    const dbPath = await ask(
+      args,
+      "db",
+      "Core DB path",
+      process.env.CORE_DB || "./data/core.db",
+    );
+    const domain = await ask(
+      args,
+      "domain",
+      "Domain name",
+      process.env.DOMAIN || "localhost",
+    );
+    const core = init(dbPath, domain);
+    const keys = core.domains.keys(domain);
+    const rec = core.domains.dnsRecord(domain);
+    consola.success(`Key ID: ${keys.key_id}`);
+    consola.success(`Fingerprint: ${rec.fingerprint}`);
+    consola.box(`DNS TXT for ${rec.name}:\n\n${rec.value}`);
   },
 });
 
 const inbox = defineCommand({
   meta: { name: "inbox", description: "Create an inbox alias" },
   args: {
-    db: { type: "string", description: "Database path", valueHint: "path" },
-    domain: { type: "string", description: "Domain name", alias: ["d"] },
-    name: {
-      type: "string",
-      description: "Alias name (e.g. alice)",
-      alias: ["n"],
-    },
-    password: { type: "string", description: "Alias password", alias: ["p"] },
+    db: { type: "string" },
+    domain: { type: "string", alias: ["d"] },
+    name: { type: "string", alias: ["n"] },
+    password: { type: "string", alias: ["p"] },
   },
   async run({ args }) {
-    const dbPath = await resolveDb(args);
-    const domain = await resolveDomain(args);
+    const dbPath = await ask(
+      args,
+      "db",
+      "Core DB path",
+      process.env.CORE_DB || "./data/core.db",
+    );
+    const domain = await ask(
+      args,
+      "domain",
+      "Domain name",
+      process.env.DOMAIN || "localhost",
+    );
     const name =
       args.name ||
-      (await consola.prompt("Alias name (e.g. alice):", { type: "text" }));
+      (await consola.prompt("Alias (e.g. alice):", { type: "text" }));
     const password =
       args.password ??
       (await consola.prompt("Password:", { type: "text", default: "" }));
-
     if (!name) {
-      consola.error("Alias name cannot be empty.");
+      consola.error("Alias required");
       process.exit(1);
     }
 
-    init(dbPath, domain);
-
-    const hashed = await hashPassword(password);
-    createInboxAddress(domain, name, hashed);
-
+    const core = init(dbPath, domain);
+    core.addresses.createInbox(domain, name, await hashPassword(password));
     consola.success(`Inbox "${name}@${domain}" created.`);
   },
 });
 
 const forward = defineCommand({
-  meta: { name: "forward", description: "Create a forward alias" },
+  meta: { name: "forward", description: "Create a forward route" },
   args: {
-    db: { type: "string", description: "Database path", valueHint: "path" },
-    domain: { type: "string", description: "Domain name", alias: ["d"] },
-    name: {
-      type: "string",
-      description: 'Alias name (e.g. sales or "*")',
-      alias: ["n"],
-    },
-    target: {
-      type: "string",
-      description: "Forward target (e.g. alice@localhost)",
-      alias: ["t"],
-    },
+    db: { type: "string" },
+    domain: { type: "string", alias: ["d"] },
+    name: { type: "string", alias: ["n"] },
+    target: { type: "string", alias: ["t"] },
   },
   async run({ args }) {
-    const dbPath = await resolveDb(args);
-    const domain = await resolveDomain(args);
+    const dbPath = await ask(
+      args,
+      "db",
+      "Core DB path",
+      process.env.CORE_DB || "./data/core.db",
+    );
+    const domain = await ask(
+      args,
+      "domain",
+      "Domain name",
+      process.env.DOMAIN || "localhost",
+    );
     const name =
       args.name ||
-      (await consola.prompt('Alias name (e.g. sales or "*"):', {
-        type: "text",
-      }));
+      (await consola.prompt('Pattern (e.g. sales or "*"):', { type: "text" }));
     const target =
       args.target ||
-      (await consola.prompt(`Forward target (e.g. alice@${domain}):`, {
+      (await consola.prompt(`Target (e.g. alice@${domain}):`, {
         type: "text",
       }));
-
     if (!name || !target) {
-      consola.error("Alias name and forward target are required.");
+      consola.error("Pattern and target required");
       process.exit(1);
     }
 
-    init(dbPath, domain);
-    createRoute({
-      domain,
-      pattern: name,
-      targetAddress: target,
-    });
+    const core = init(dbPath, domain);
+    core.routes.create({ domain, pattern: name, targetAddress: target });
     consola.success(`Forward "${name}@${domain}" → ${target} created.`);
   },
 });
 
-const main = defineCommand({
-  meta: {
-    name: "smxp",
-    version: "1.0.0",
-    description: "SMXP server management CLI",
-  },
-  subCommands: { setup, inbox, forward },
-});
-
-runMain(main);
+runMain(
+  defineCommand({
+    meta: { name: "smxp", version: "1.0.0", description: "SMXP server CLI" },
+    subCommands: { setup, inbox, forward },
+  }),
+);

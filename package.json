@@ -20,8 +20,8 @@
     "send2to1": "PORT=3002 DB=./data/node2.db MESSAGES_DB=./data/node2-messages.db bun src/main.js send alice@test2.orielhaim.com bob@test1.orielhaim.com \"Hello from node2!\""
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.14",
-    "@types/bun": "^1.3.13",
+    "@biomejs/biome": "2.4.15",
+    "@types/bun": "^1.3.14",
     "citty": "^0.2.2",
     "consola": "^3.4.2"
   },
