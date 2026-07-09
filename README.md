@@ -1,5 +1,8 @@
 # SMXP - Simple Message eXchange Protocol
 
+[![Status](https://img.shields.io/badge/status-in%20development-orange?style=flat-square)](https://github.com/orielhaim/TunTun)
+[![Discord](https://img.shields.io/badge/discord-join%20server-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/y5bNc3MYKz)
+
 **The messaging protocol of the future**
 
 <div align="center">
